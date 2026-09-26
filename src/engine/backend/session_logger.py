@@ -2,9 +2,9 @@ import os
 import json
 from datetime import datetime
 from typing import List, Dict, Any, Optional
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 
-from src.engine.backend.physics import TrajectoryResult, HitType
+from src.engine.backend.physics import TrajectoryResult
 
 
 @dataclass
@@ -17,20 +17,36 @@ class TestAttemptRecord:
 
 class TestSessionLogger:
     """
-    Manages and persists history logs for test runs into individual JSON files inside the `outputs/` directory.
-    Each test log captures both the LLM output and the simulation feedback.
+    Manages and persists test run sessions into dedicated folders inside `outputs/`.
+    
+    Folder structure:
+      outputs/<test_name>_<timestamp>/
+        ├── scenario.json   # The initial scenario state given to the LLM
+        └── history.json    # Complete attempt-by-attempt log (LLM outputs + simulation feedback)
     """
 
     def __init__(self, test_name: str, initial_state_dict: Dict[str, Any], output_dir: str = "outputs"):
         self.test_name = test_name
-        self.output_dir = output_dir
+        self.output_base_dir = output_dir
         self.session_id = f"{test_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        # Dedicated folder for this test run
+        self.test_folder = os.path.join(self.output_base_dir, self.session_id)
+        os.makedirs(self.test_folder, exist_ok=True)
+
         self.initial_state = initial_state_dict
         self.history: List[TestAttemptRecord] = []
         self.is_solved: bool = False
         
-        os.makedirs(self.output_dir, exist_ok=True)
-        self.file_path = os.path.join(self.output_dir, f"{self.session_id}.json")
+        self.scenario_file_path = os.path.join(self.test_folder, "scenario.json")
+        self.history_file_path = os.path.join(self.test_folder, "history.json")
+
+        # Save initial scenario immediately
+        self._save_scenario()
+
+    def _save_scenario(self):
+        with open(self.scenario_file_path, "w", encoding="utf-8") as f:
+            json.dump(self.initial_state, f, indent=2)
 
     def record_attempt(
         self,
@@ -86,33 +102,45 @@ class TestSessionLogger:
         return payload
 
     def save(self) -> str:
-        """Saves current test session history to disk."""
+        """Saves current test session history to history.json."""
         data = {
             "session_id": self.session_id,
             "test_name": self.test_name,
             "is_solved": self.is_solved,
             "total_attempts": len(self.history),
-            "created_at": self.session_id.split("_", 1)[1] if "_" in self.session_id else "",
             "initial_state": self.initial_state,
             "history": [asdict(rec) for rec in self.history],
         }
 
-        with open(self.file_path, "w", encoding="utf-8") as f:
+        with open(self.history_file_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
 
-        return self.file_path
+        return self.history_file_path
 
     @classmethod
-    def load(cls, filepath: str) -> "TestSessionLogger":
-        """Load an existing test session JSON."""
-        with open(filepath, "r", encoding="utf-8") as f:
+    def load(cls, history_or_folder_path: str) -> "TestSessionLogger":
+        """Load a test session from a folder path or history.json path."""
+        if os.path.isdir(history_or_folder_path):
+            hist_file = os.path.join(history_or_folder_path, "history.json")
+        else:
+            hist_file = history_or_folder_path
+
+        with open(hist_file, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        logger = cls(test_name=data["test_name"], initial_state_dict=data["initial_state"])
+        parent_dir = os.path.dirname(os.path.abspath(hist_file))
+        base_outputs_dir = os.path.dirname(parent_dir)
+
+        logger = cls.__new__(cls)
+        logger.test_name = data["test_name"]
+        logger.output_base_dir = base_outputs_dir
         logger.session_id = data["session_id"]
-        logger.file_path = filepath
+        logger.test_folder = parent_dir
+        logger.scenario_file_path = os.path.join(parent_dir, "scenario.json")
+        logger.history_file_path = hist_file
+        logger.initial_state = data.get("initial_state", {})
         logger.is_solved = data.get("is_solved", False)
-        
+
         logger.history = [
             TestAttemptRecord(
                 attempt=item["attempt"],

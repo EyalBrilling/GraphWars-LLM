@@ -313,16 +313,34 @@ class GraphWarApp:
         self.root.bind("<Right>", lambda e: self._next_attempt())
 
     def _refresh_outputs_list(self):
-        output_files = glob.glob("outputs/*.json")
-        basenames = [os.path.basename(f) for f in sorted(output_files, reverse=True)]
-        self.output_files_menu["values"] = basenames
-        if basenames:
-            self.output_files_menu.set(basenames[0])
+        items = []
+        if os.path.exists("outputs"):
+            for entry in sorted(os.listdir("outputs"), reverse=True):
+                full_path = os.path.join("outputs", entry)
+                if os.path.isdir(full_path):
+                    hist_file = os.path.join(full_path, "history.json")
+                    if os.path.exists(hist_file):
+                        items.append(f"[Folder] {entry}")
+                elif entry.endswith(".json") and entry != ".gitkeep":
+                    items.append(entry)
+
+        self.output_files_menu["values"] = items
+        if items:
+            self.output_files_menu.set(items[0])
+            self._on_output_selected()
 
     def _on_output_selected(self, event=None):
-        filename = self.output_files_var.get()
-        if filename:
-            filepath = os.path.join("outputs", filename)
+        selected = self.output_files_var.get()
+        if not selected:
+            return
+        
+        if selected.startswith("[Folder] "):
+            folder_name = selected.replace("[Folder] ", "").strip()
+            filepath = os.path.join("outputs", folder_name, "history.json")
+        else:
+            filepath = os.path.join("outputs", selected)
+
+        if os.path.exists(filepath):
             self._load_json_data(filepath)
 
     def _browse_json_file(self):

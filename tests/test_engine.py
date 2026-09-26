@@ -93,12 +93,14 @@ def test_session_logger_history():
     assert logger.is_solved
     assert logger.history[1].simulation_result["is_success"] is True
 
-    # Test loading from file
-    loaded_logger = TestSessionLogger.load(logger.file_path)
+    # Test loading from folder and history file
+    loaded_logger = TestSessionLogger.load(logger.history_file_path)
     assert loaded_logger.is_solved is True
     assert len(loaded_logger.history) == 2
     assert loaded_logger.history[0].llm_output["formula"] == "0"
     assert loaded_logger.history[1].llm_output["formula"] == "-0.02 * (x + 20) * (x - 20)"
+    assert os.path.exists(logger.scenario_file_path)
+    assert os.path.exists(logger.history_file_path)
 
 
 if __name__ == "__main__":

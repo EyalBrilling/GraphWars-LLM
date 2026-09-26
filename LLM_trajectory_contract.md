@@ -126,11 +126,15 @@ The LLM response **MUST** be a valid JSON object matching the following structur
 
 ---
 
-## 5. History Files & Storage
+## 5. History Files & Test Folder Storage
 
-- Each test run generates its own history file inside the `outputs/` folder:
-  `outputs/<test_name>_<timestamp>.json`
-- Each entry in the history file preserves both:
+- Each test run generates its own dedicated folder inside `outputs/`:
+  ```
+  outputs/<test_name>_<timestamp>/
+  ├── scenario.json   # Initial scenario state given to the LLM
+  └── history.json    # Complete attempt-by-attempt log with LLM outputs & simulation results
+  ```
+- Each record inside `history.json` contains:
   1. The **`llm_output`** (the reasoning, strategy, waypoints, and formula produced by the LLM).
   2. The **`simulation_result`** (exact impact coordinate, collision type, obstacle hit, and distance to target).
 - The LLM receives this cumulative history on each successive attempt to inform its future spatial decisions.
