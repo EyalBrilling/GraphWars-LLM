@@ -2,7 +2,7 @@
 
 This document defines the formal specification and interface contract for Large Language Models (LLMs) generating mathematical trajectories in GraphWars-LLM.
 
-Any LLM acting as a trajectory generator or navigator **MUST** adhere strictly to the input schema, mathematical rules, and output contract defined below.
+Any LLM acting as a trajectory generator **MUST** adhere strictly to the input schema, mathematical rules, and output contract defined below.
 
 ---
 
@@ -15,7 +15,7 @@ Your goal is to formulate a mathematical trajectory $y = f(x)$ that starts at th
 
 ## 2. Input Specification (What the LLM Receives)
 
-The engine provides the LLM with a structured state payload (as JSON or structured Markdown):
+The current arena state and the previous history of attempts (loaded from the test session history JSON) are provided to the LLM:
 
 ### Input Schema
 
@@ -63,12 +63,19 @@ The engine provides the LLM with a structured state payload (as JSON or structur
   "history": [
     {
       "attempt": 1,
-      "formula": "0",
-      "hit_type": "obstacle",
-      "hit_coordinate": { "x": -2.0, "y": 0.0 },
-      "hit_obstacle": "Center_Pillar",
-      "closest_distance_to_target": 22.0,
-      "error_message": null
+      "llm_output": {
+        "reasoning": "Direct shot toward target at (20, 0).",
+        "strategy": "direct",
+        "planned_waypoints": [{ "x": -20.0, "y": 0.0 }, { "x": 20.0, "y": 0.0 }],
+        "formula": "0"
+      },
+      "simulation_result": {
+        "hit_type": "obstacle",
+        "hit_coordinate": { "x": -2.0, "y": 0.0 },
+        "hit_obstacle": "Center_Pillar",
+        "closest_distance_to_target": 22.0,
+        "error_message": null
+      }
     }
   ]
 }
@@ -91,13 +98,13 @@ The engine provides the LLM with a structured state payload (as JSON or structur
 
 ## 4. Output Contract (What the LLM Must Return)
 
-The LLM response **MUST** contain a valid JSON object adhering to the following schema:
+The LLM response **MUST** be a valid JSON object matching the following structure:
 
 ### Output JSON Schema
 
 ```json
 {
-  "reasoning": "Brief spatial analysis of obstacle clearance and waypoint logic",
+  "reasoning": "Brief spatial analysis of obstacle clearance and waypoint logic based on arena and history",
   "strategy": "arc_over | s_curve | direct | low_tunnel | trigonometric_wave",
   "planned_waypoints": [
     { "x": -20.0, "y": 0.0 },
@@ -112,72 +119,18 @@ The LLM response **MUST** contain a valid JSON object adhering to the following 
 
 | Field | Type | Description | Required |
 | :--- | :--- | :--- | :--- |
-| `reasoning` | `string` | 1–3 sentences diagnosing obstacles and justifying the clearance path. | **Yes** |
+| `reasoning` | `string` | 1–3 sentences diagnosing obstacles / past attempts and justifying the clearance path. | **Yes** |
 | `strategy` | `string` | High-level trajectory archetype (e.g. `arc_over`, `s_curve`, `wave`). | **Yes** |
 | `planned_waypoints` | `array of {x, y}` | Key anchor coordinates the curve passes through. | **Yes** |
 | `formula` | `string` | The exact mathematical formula string for $y = f(x)$. | **Yes** |
 
 ---
 
-## 5. Iteration & Diagnosis Loop
+## 5. History Files & Storage
 
-When a proposed formula fails during simulation, the engine executes the diagnostic cycle:
-
-```
-[ LLM Output Formula ]
-          │
-          ▼
- [ Engine Simulation ]
-          │
-     ┌────┴─────────────────────────────┐
-     ▼                                  ▼
-[ Target Hit ✅ ]             [ Collision / Miss ❌ ]
-(Task Complete)                         │
-                                        ▼
-                         [ Generate Structured Feedback ]
-                         - Exact impact point (x_hit, y_hit)
-                         - Hit obstacle identity & bounding box
-                         - Distance remaining to target
-                                        │
-                                        ▼
-                         [ Append to `history` array ]
-                                        │
-                                        ▼
-                         [ Next Iteration: LLM Mutates / Fixes ]
-```
-
----
-
-## 6. Example Interaction
-
-### Input to LLM (Attempt 2):
-```json
-{
-  "shooter": { "x": -20.0, "y": 0.0 },
-  "targets": [{ "id": "target_1", "x": 20.0, "y": 0.0, "radius": 0.8 }],
-  "obstacles": [{ "name": "Center_Pillar", "bounding_box": { "x_min": -2.0, "x_max": 2.0, "y_min": -15.0, "y_max": 6.0 } }],
-  "history": [
-    {
-      "attempt": 1,
-      "formula": "0.1 * x",
-      "hit_type": "obstacle",
-      "hit_coordinate": { "x": -2.0, "y": -0.2 },
-      "hit_obstacle": "Center_Pillar"
-    }
-  ]
-}
-```
-
-### Expected LLM Response:
-```json
-{
-  "reasoning": "Attempt 1 hit Center_Pillar at x=-2.0, y=-0.2 because the pillar extends up to y=6.0. We need an inverted parabola with apex at (x=0, y=8.0) to clear the top with +2.0 margin and land at (20, 0).",
-  "strategy": "arc_over",
-  "planned_waypoints": [
-    { "x": -20.0, "y": 0.0 },
-    { "x": 0.0, "y": 8.0 },
-    { "x": 20.0, "y": 0.0 }
-  ],
-  "formula": "-0.02 * (x + 20) * (x - 20)"
-}
-```
+- Each test run generates its own history file inside the `outputs/` folder:
+  `outputs/<test_name>_<timestamp>.json`
+- Each entry in the history file preserves both:
+  1. The **`llm_output`** (the reasoning, strategy, waypoints, and formula produced by the LLM).
+  2. The **`simulation_result`** (exact impact coordinate, collision type, obstacle hit, and distance to target).
+- The LLM receives this cumulative history on each successive attempt to inform its future spatial decisions.

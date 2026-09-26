@@ -15,13 +15,12 @@ env/
 *.swp
 *.swo
 
-# Project outputs
+# Project outputs & runs
+outputs/*.json
+!outputs/.gitkeep
 runs/
 logs/
-figures/
-*.png
-*.gif
-*.mp4
+figures/*.png
 .cache/
 
 # OS metadata
