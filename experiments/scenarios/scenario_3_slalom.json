@@ -1,0 +1,66 @@
+{
+  "name": "slalom",
+  "difficulty": "hard",
+  "description": "Three alternating pillars (bottom-top-bottom) requiring an S-curve or sinusoidal wave.",
+  "bounds": {
+    "x_min": -25.0,
+    "x_max": 25.0,
+    "y_min": -15.0,
+    "y_max": 15.0
+  },
+  "shooter": {
+    "name": "Player1",
+    "x": -22.0,
+    "y": 0.0,
+    "radius": 0.6
+  },
+  "targets": [
+    {
+      "id": "target_1",
+      "x": 22.0,
+      "y": 0.0,
+      "radius": 0.8,
+      "is_alive": true
+    }
+  ],
+  "obstacles": [
+    {
+      "id": "obs_1",
+      "type": "box",
+      "name": "Pillar_1_Bottom",
+      "bounding_box": {
+        "x_min": -12.0,
+        "x_max": -8.0,
+        "y_min": -15.0,
+        "y_max": 4.0
+      }
+    },
+    {
+      "id": "obs_2",
+      "type": "box",
+      "name": "Pillar_2_Top",
+      "bounding_box": {
+        "x_min": -2.0,
+        "x_max": 2.0,
+        "y_min": -4.0,
+        "y_max": 15.0
+      }
+    },
+    {
+      "id": "obs_3",
+      "type": "box",
+      "name": "Pillar_3_Bottom",
+      "bounding_box": {
+        "x_min": 8.0,
+        "x_max": 12.0,
+        "y_min": -15.0,
+        "y_max": 4.0
+      }
+    }
+  ],
+  "constraints": {
+    "max_formula_characters": 120,
+    "variable": "x",
+    "allowed_operators": ["+", "-", "*", "/", "**", "sin", "cos", "tan", "exp", "log", "sqrt", "abs"]
+  }
+}

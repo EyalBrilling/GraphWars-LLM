@@ -1,0 +1,66 @@
+{
+  "name": "bunker",
+  "difficulty": "hard",
+  "description": "Target sheltered behind an angled wall with a specific access opening.",
+  "bounds": {
+    "x_min": -25.0,
+    "x_max": 25.0,
+    "y_min": -15.0,
+    "y_max": 15.0
+  },
+  "shooter": {
+    "name": "Player1",
+    "x": -20.0,
+    "y": -5.0,
+    "radius": 0.6
+  },
+  "targets": [
+    {
+      "id": "target_1",
+      "x": 18.0,
+      "y": 5.0,
+      "radius": 0.8,
+      "is_alive": true
+    }
+  ],
+  "obstacles": [
+    {
+      "id": "obs_1",
+      "type": "circle",
+      "name": "Central_Sphere",
+      "bounding_box": {
+        "x_min": -5.0,
+        "x_max": 5.0,
+        "y_min": -5.0,
+        "y_max": 5.0
+      }
+    },
+    {
+      "id": "obs_2",
+      "type": "box",
+      "name": "Bunker_Wall",
+      "bounding_box": {
+        "x_min": 14.0,
+        "x_max": 15.0,
+        "y_min": -15.0,
+        "y_max": 0.0
+      }
+    },
+    {
+      "id": "obs_3",
+      "type": "box",
+      "name": "Bunker_Roof",
+      "bounding_box": {
+        "x_min": 14.0,
+        "x_max": 22.0,
+        "y_min": 9.0,
+        "y_max": 10.0
+      }
+    }
+  ],
+  "constraints": {
+    "max_formula_characters": 120,
+    "variable": "x",
+    "allowed_operators": ["+", "-", "*", "/", "**", "sin", "cos", "tan", "exp", "log", "sqrt", "abs"]
+  }
+}
