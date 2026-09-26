@@ -81,7 +81,74 @@ class GameState:
                 lines.append(f"  Collided Obstacle: {last.hit_obstacle_name}")
             lines.append(f"  Closest Distance to Target: {last.closest_distance_to_target:.3f}")
 
-        return "\n".join(lines)
+    def to_contract_dict(self, max_formula_characters: int = 120) -> Dict[str, Any]:
+        """Serialize current state to the exact LLM trajectory contract schema."""
+        return {
+            "bounds": {
+                "x_min": self.bounds.x_min,
+                "x_max": self.bounds.x_max,
+                "y_min": self.bounds.y_min,
+                "y_max": self.bounds.y_max,
+            },
+            "shooter": {
+                "name": self.shooter.name,
+                "x": self.shooter.position.x,
+                "y": self.shooter.position.y,
+                "radius": self.shooter.radius,
+            },
+            "targets": [
+                {
+                    "id": t.id,
+                    "x": t.position.x,
+                    "y": t.position.y,
+                    "radius": t.radius,
+                    "is_alive": t.is_alive,
+                }
+                for t in self.targets
+            ],
+            "obstacles": [
+                {
+                    "id": f"obs_{i+1}",
+                    "type": obs.__class__.__name__.replace("Obstacle", "").lower(),
+                    "name": obs.name,
+                    "bounding_box": {
+                        "x_min": obs.get_bounding_box()[0],
+                        "x_max": obs.get_bounding_box()[1],
+                        "y_min": obs.get_bounding_box()[2],
+                        "y_max": obs.get_bounding_box()[3],
+                    },
+                }
+                for i, obs in enumerate(self.obstacles)
+            ],
+            "constraints": {
+                "max_formula_characters": max_formula_characters,
+                "variable": "x",
+                "allowed_operators": [
+                    "+", "-", "*", "/", "**", "sin", "cos", "tan", "exp", "log", "sqrt", "abs"
+                ],
+            },
+            "history": [
+                {
+                    "attempt": idx + 1,
+                    "formula": h.formula_str,
+                    "hit_type": h.hit_type.value,
+                    "hit_coordinate": (
+                        {"x": h.hit_coordinate.x, "y": h.hit_coordinate.y}
+                        if h.hit_coordinate
+                        else None
+                    ),
+                    "hit_obstacle": h.hit_obstacle_name,
+                    "closest_distance_to_target": round(h.closest_distance_to_target, 3),
+                    "error_message": h.error_message,
+                }
+                for idx, h in enumerate(self.history)
+            ],
+        }
+
+    def to_contract_json(self, indent: int = 2) -> str:
+        """Return formatted JSON matching the LLM trajectory contract."""
+        import json
+        return json.dumps(self.to_contract_dict(), indent=indent)
 
     @classmethod
     def create_preset(cls, preset_name: str = "pillar") -> "GameState":
