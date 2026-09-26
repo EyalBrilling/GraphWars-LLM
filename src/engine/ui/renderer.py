@@ -20,8 +20,14 @@ class ArenaRenderer:
         self.ax = ax
         self.bounds = bounds
 
-    def render(self, state: GameState, current_result: Optional[TrajectoryResult] = None):
-        """Draw the entire scene."""
+    def render(
+        self,
+        state: GameState,
+        current_result: Optional[TrajectoryResult] = None,
+        waypoints: Optional[List[Point2D]] = None,
+        attempt_label: Optional[str] = None,
+    ):
+        """Draw the entire scene with optional planned waypoints."""
         self.ax.clear()
         
         # Grid & Background
@@ -42,15 +48,37 @@ class ArenaRenderer:
         for spine in self.ax.spines.values():
             spine.set_color("#334155")
 
+        if attempt_label:
+            self.ax.set_title(attempt_label, color="#38BDF8", fontsize=11, fontweight="bold", pad=10)
+
         # 1. Draw Obstacles
         for obs in state.obstacles:
             self._draw_obstacle(obs)
 
-        # 2. Draw Shooter
+        # 2. Draw Planned Waypoints (if provided by LLM)
+        if waypoints and len(waypoints) > 0:
+            w_xs = [p.x for p in waypoints]
+            w_ys = [p.y for p in waypoints]
+            self.ax.plot(
+                w_xs,
+                w_ys,
+                color="#A855F7",
+                linestyle="--",
+                linewidth=1.2,
+                alpha=0.7,
+                marker="o",
+                markersize=6,
+                markerfacecolor="#C084FC",
+                markeredgecolor="#FFFFFF",
+                label="LLM Waypoints",
+                zorder=4,
+            )
+
+        # 3. Draw Shooter
         shooter_circle = Circle(
             (state.shooter.position.x, state.shooter.position.y),
             state.shooter.radius,
-            facecolor="#38BDF8",  # Cyan/Blue
+            facecolor="#38BDF8",
             edgecolor="#FFFFFF",
             linewidth=1.5,
             zorder=5,
@@ -68,7 +96,7 @@ class ArenaRenderer:
             zorder=6
         )
 
-        # 3. Draw Targets
+        # 4. Draw Targets
         for target in state.targets:
             color = "#EF4444" if target.is_alive else "#6B7280"
             alpha = 1.0 if target.is_alive else 0.4
@@ -82,7 +110,6 @@ class ArenaRenderer:
                 zorder=5,
             )
             self.ax.add_patch(target_circle)
-            # Bullseye ring
             inner_ring = Circle(
                 (target.position.x, target.position.y),
                 target.radius * 0.4,
@@ -102,21 +129,21 @@ class ArenaRenderer:
                 zorder=6
             )
 
-        # 4. Draw Trajectory History (Faded)
+        # 5. Draw Trajectory History (Faded)
         for old_result in state.history[:-1]:
             if old_result.trajectory_points:
                 xs = [p.x for p in old_result.trajectory_points]
                 ys = [p.y for p in old_result.trajectory_points]
-                self.ax.plot(xs, ys, color="#64748B", linestyle=":", linewidth=1.0, alpha=0.4, zorder=3)
+                self.ax.plot(xs, ys, color="#64748B", linestyle=":", linewidth=1.0, alpha=0.35, zorder=3)
 
-        # 5. Draw Active / Last Trajectory
+        # 6. Draw Active / Last Trajectory
         active_res = current_result or (state.history[-1] if state.history else None)
         if active_res and active_res.trajectory_points:
             xs = [p.x for p in active_res.trajectory_points]
             ys = [p.y for p in active_res.trajectory_points]
             
             traj_color = "#22C55E" if active_res.is_success else "#F59E0B"
-            self.ax.plot(xs, ys, color=traj_color, linewidth=2.2, alpha=0.9, zorder=4, label=f"y = {active_res.formula_str}")
+            self.ax.plot(xs, ys, color=traj_color, linewidth=2.4, alpha=0.95, zorder=5, label=f"y = {active_res.formula_str}")
 
             # Impact point marker
             if active_res.hit_coordinate:
@@ -126,10 +153,10 @@ class ArenaRenderer:
                     active_res.hit_coordinate.x,
                     active_res.hit_coordinate.y,
                     marker=marker_symbol,
-                    markersize=12,
+                    markersize=13,
                     markeredgecolor="white",
                     markerfacecolor=marker_color,
-                    markeredgewidth=1.5,
+                    markeredgewidth=1.8,
                     zorder=10
                 )
 
