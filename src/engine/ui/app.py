@@ -519,7 +519,8 @@ class GraphWarApp:
         self.renderer.render(self.game_state, current_result)
         self.canvas.draw()
         self.diag_text.delete("1.0", tk.END)
-        self.diag_text.insert(tk.END, self.game_state.get_text_description())
+        desc = self.game_state.get_text_description() or ""
+        self.diag_text.insert(tk.END, str(desc))
 
 
 def launch():

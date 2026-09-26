@@ -81,6 +81,8 @@ class GameState:
                 lines.append(f"  Collided Obstacle: {last.hit_obstacle_name}")
             lines.append(f"  Closest Distance to Target: {last.closest_distance_to_target:.3f}")
 
+        return "\n".join(lines)
+
     def to_contract_dict(self, max_formula_characters: int = 120) -> Dict[str, Any]:
         """Serialize current state to the exact LLM trajectory contract schema."""
         return {
