@@ -16,8 +16,6 @@ env/
 *.swo
 
 # Project outputs & runs
-outputs/*.json
-!outputs/.gitkeep
 runs/
 logs/
 figures/*.png

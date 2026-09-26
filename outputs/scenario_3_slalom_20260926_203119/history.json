@@ -1,0 +1,128 @@
+{
+  "session_id": "scenario_3_slalom_20260926_203119",
+  "test_name": "scenario_3_slalom",
+  "is_solved": true,
+  "total_attempts": 1,
+  "initial_state": {
+    "bounds": {
+      "x_min": -25.0,
+      "x_max": 25.0,
+      "y_min": -15.0,
+      "y_max": 15.0
+    },
+    "shooter": {
+      "name": "Player1",
+      "x": -22.0,
+      "y": 0.0,
+      "radius": 0.6
+    },
+    "targets": [
+      {
+        "id": "target_1",
+        "x": 22.0,
+        "y": 0.0,
+        "radius": 0.8,
+        "is_alive": true
+      }
+    ],
+    "obstacles": [
+      {
+        "id": "obs_1",
+        "type": "box",
+        "name": "Pillar_1_Bottom",
+        "bounding_box": {
+          "x_min": -12.0,
+          "x_max": -8.0,
+          "y_min": -15.0,
+          "y_max": 4.0
+        }
+      },
+      {
+        "id": "obs_2",
+        "type": "box",
+        "name": "Pillar_2_Top",
+        "bounding_box": {
+          "x_min": -2.0,
+          "x_max": 2.0,
+          "y_min": -4.0,
+          "y_max": 15.0
+        }
+      },
+      {
+        "id": "obs_3",
+        "type": "box",
+        "name": "Pillar_3_Bottom",
+        "bounding_box": {
+          "x_min": 8.0,
+          "x_max": 12.0,
+          "y_min": -15.0,
+          "y_max": 4.0
+        }
+      }
+    ],
+    "constraints": {
+      "max_formula_characters": 120,
+      "variable": "x",
+      "allowed_operators": [
+        "+",
+        "-",
+        "*",
+        "/",
+        "**",
+        "sin",
+        "cos",
+        "tan",
+        "exp",
+        "log",
+        "sqrt",
+        "abs"
+      ]
+    },
+    "history": []
+  },
+  "history": [
+    {
+      "attempt": 1,
+      "timestamp": "2026-09-26T20:31:19.903420",
+      "llm_output": {
+        "reasoning": "The trajectory uses an amplitude-modulated cosine wave to slalom cleanly over Pillar 1 (y > 4), dip under Pillar 2 (y < -4), rise over Pillar 3 (y > 4), and terminate exactly at the target.",
+        "strategy": "trigonometric_wave",
+        "planned_waypoints": [
+          {
+            "x": -22.0,
+            "y": 0.0
+          },
+          {
+            "x": -10.0,
+            "y": 7.14
+          },
+          {
+            "x": 0.0,
+            "y": -9.0
+          },
+          {
+            "x": 10.0,
+            "y": 7.14
+          },
+          {
+            "x": 22.0,
+            "y": 0.0
+          }
+        ],
+        "formula": "-9*cos(0.314159*x)*(1-(x/22)**2)"
+      },
+      "simulation_result": {
+        "is_success": true,
+        "hit_type": "target",
+        "hit_coordinate": {
+          "x": 21.4,
+          "y": -0.438
+        },
+        "hit_obstacle": null,
+        "hit_target_id": "target_1",
+        "closest_distance_to_target": 0.0,
+        "error_message": null
+      }
+    }
+  ]
+}
