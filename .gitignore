@@ -18,6 +18,8 @@ env/
 # Project outputs & runs
 runs/
 logs/
+outputs/*
+!outputs/.gitkeep
 figures/*.png
 .cache/
 

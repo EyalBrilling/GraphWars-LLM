@@ -1,0 +1,167 @@
+{
+  "name": "random_gauntlet_seed777",
+  "difficulty": "grandmaster",
+  "description": "Large-scale (100x60) randomized non-periodic gauntlet with 11 asymmetric obstacles.",
+  "bounds": {
+    "x_min": -50.0,
+    "x_max": 50.0,
+    "y_min": -30.0,
+    "y_max": 30.0
+  },
+  "shooter": {
+    "name": "Player1",
+    "x": -45.0,
+    "y": -12.71,
+    "radius": 0.8
+  },
+  "targets": [
+    {
+      "id": "target_1",
+      "x": 45.0,
+      "y": 11.68,
+      "radius": 1.0,
+      "is_alive": true
+    }
+  ],
+  "obstacles": [
+    {
+      "id": "mine_sphere_1",
+      "type": "circle",
+      "name": "Mine_Sphere_1",
+      "bounding_box": {
+        "x_min": -35.98,
+        "x_max": -29.25,
+        "y_min": 1.46,
+        "y_max": 8.19
+      }
+    },
+    {
+      "id": "mine_sphere_2",
+      "type": "circle",
+      "name": "Mine_Sphere_2",
+      "bounding_box": {
+        "x_min": -32.57,
+        "x_max": -26.74,
+        "y_min": -0.87,
+        "y_max": 4.95
+      }
+    },
+    {
+      "id": "pillar_top_1",
+      "type": "box",
+      "name": "Pillar_Top_1",
+      "bounding_box": {
+        "x_min": -31.91,
+        "x_max": -28.87,
+        "y_min": -4.25,
+        "y_max": 30.0
+      }
+    },
+    {
+      "id": "mine_sphere_4",
+      "type": "circle",
+      "name": "Mine_Sphere_4",
+      "bounding_box": {
+        "x_min": -26.06,
+        "x_max": -20.41,
+        "y_min": -5.5,
+        "y_max": 0.15
+      }
+    },
+    {
+      "id": "floating_bar_2",
+      "type": "box",
+      "name": "Floating_Bar_2",
+      "bounding_box": {
+        "x_min": -23.08,
+        "x_max": -19.68,
+        "y_min": -3.21,
+        "y_max": 7.12
+      }
+    },
+    {
+      "id": "pillar_bot_3",
+      "type": "box",
+      "name": "Pillar_Bottom_3",
+      "bounding_box": {
+        "x_min": -12.88,
+        "x_max": -8.39,
+        "y_min": -30.0,
+        "y_max": 8.84
+      }
+    },
+    {
+      "id": "floating_bar_4",
+      "type": "box",
+      "name": "Floating_Bar_4",
+      "bounding_box": {
+        "x_min": -0.19,
+        "x_max": 2.52,
+        "y_min": 1.14,
+        "y_max": 14.61
+      }
+    },
+    {
+      "id": "pillar_top_5",
+      "type": "box",
+      "name": "Pillar_Top_5",
+      "bounding_box": {
+        "x_min": 9.18,
+        "x_max": 12.84,
+        "y_min": -3.31,
+        "y_max": 30.0
+      }
+    },
+    {
+      "id": "mine_sphere_3",
+      "type": "circle",
+      "name": "Mine_Sphere_3",
+      "bounding_box": {
+        "x_min": 15.92,
+        "x_max": 22.57,
+        "y_min": -3.49,
+        "y_max": 3.15
+      }
+    },
+    {
+      "id": "pillar_bot_6",
+      "type": "box",
+      "name": "Pillar_Bottom_6",
+      "bounding_box": {
+        "x_min": 16.91,
+        "x_max": 20.74,
+        "y_min": -30.0,
+        "y_max": 1.25
+      }
+    },
+    {
+      "id": "pillar_top_7",
+      "type": "box",
+      "name": "Pillar_Top_7",
+      "bounding_box": {
+        "x_min": 26.82,
+        "x_max": 30.94,
+        "y_min": -3.26,
+        "y_max": 30.0
+      }
+    }
+  ],
+  "constraints": {
+    "max_formula_characters": 180,
+    "variable": "x",
+    "allowed_operators": [
+      "+",
+      "-",
+      "*",
+      "/",
+      "**",
+      "sin",
+      "cos",
+      "tan",
+      "exp",
+      "log",
+      "sqrt",
+      "abs"
+    ]
+  }
+}
