@@ -19,7 +19,7 @@ Your goal is to formulate an explicit mathematical function y = f(x) that starts
 ATTEMPT BUDGET & STRATEGY:
 - You have a STRICT LIMITED BUDGET of maximum allowed attempts (see attempt_info in payload).
 - Think of a strategy that maximizes hit success in the number of attempts you have.
-- Each attempt has a fixed output budget shared by your thinking and your answer. If you run out before giving the JSON answer, the attempt counts as a miss (hit_type "no_answer"). A reasonable formula you can refine next attempt beats a perfect one you never write.
+- Each attempt has its own token budget (attempt_info.token_budget_per_attempt), shared by your thinking and your answer; unused budget does not carry over to later attempts. If you run out before giving the JSON answer, the attempt counts as a miss (hit_type "no_answer").
 
 INPUT & ATTEMPT HISTORY ANALYSIS:
 - You receive the arena geometry (shooter, target, bounds, obstacles), attempt_info budget, and an array of past attempts under 'history'.
@@ -52,7 +52,9 @@ You MUST respond with ONLY a valid JSON object matching this exact schema:
 """
 
 
-DEFAULT_MAX_TOKENS = 16000
+DEFAULT_TASK_BUDGET = 20000  # tokens the model is told it has per attempt (API minimum is 20,000)
+DEFAULT_MAX_TOKENS = 24000   # hard cap the API enforces (not shown to the model); headroom above the budget
+TASK_BUDGET_BETA = "task-budgets-2026-03-13"
 
 # USD per 1M tokens (input, output), Anthropic first-party list prices as of 2026-10.
 # Thinking tokens are billed as output. Unknown models get token counts but no $ figure.
@@ -114,11 +116,47 @@ class LLMClient:
     """Handles communications with LLM providers (Gemini, OpenAI, Anthropic, or Mock)."""
 
     def __init__(self, provider: str = "gemini", model: Optional[str] = None, api_key: Optional[str] = None,
-                 max_tokens: int = DEFAULT_MAX_TOKENS):
+                 max_tokens: int = DEFAULT_MAX_TOKENS, task_budget: Optional[int] = DEFAULT_TASK_BUDGET):
         self.provider = provider.lower()
         self.model = model or self._default_model()
         self.api_key = api_key or self._resolve_api_key()
         self.max_tokens = max_tokens  # caps thinking + answer together, i.e. the worst-case cost per attempt
+        # Anthropic task budget: a countdown the model sees while it works, so it can pace itself.
+        # 0/None disables it. Only Anthropic supports it; other providers ignore it.
+        self.task_budget = task_budget or None
+        if self.task_budget is not None and self.task_budget < 20000:
+            raise ValueError("task_budget must be at least 20000 tokens (API minimum), or 0 to disable")
+
+    @property
+    def budget_shown_to_model(self) -> int:
+        """Per-attempt token budget stated to the model (the task budget if on, else the hard cap)."""
+        if self.provider == "anthropic" and self.task_budget:
+            return self.task_budget
+        return self.max_tokens
+
+    def build_anthropic_request(self, user_message: str) -> Tuple[Dict[str, Any], Dict[str, str]]:
+        """Request body and headers for the Anthropic Messages API."""
+        req_body: Dict[str, Any] = {
+            "model": self.model,
+            "max_tokens": self.max_tokens,
+            # Thinking runs by default on current models, but its text is omitted unless
+            # requested. "summarized" returns a readable summary (the raw chain is never exposed).
+            "thinking": {"type": "adaptive", "display": "summarized"},
+            "system": SYSTEM_PROMPT,
+            "messages": [{"role": "user", "content": user_message}],
+        }
+        headers = {
+            "Content-Type": "application/json",
+            "x-api-key": self.api_key or "",
+            "anthropic-version": "2023-06-01",
+        }
+        if self.task_budget:
+            req_body["output_config"] = {"task_budget": {"type": "tokens", "total": self.task_budget}}
+            headers["anthropic-beta"] = TASK_BUDGET_BETA
+        workspace_id = os.getenv("ANTHROPIC_WORKSPACE_ID")
+        if workspace_id:
+            headers["anthropic-workspace-id"] = workspace_id
+        return req_body, headers
 
     def _default_model(self) -> str:
         if self.provider == "gemini":
@@ -237,24 +275,7 @@ class LLMClient:
             raise ValueError("ANTHROPIC_API_KEY environment variable is not set.")
 
         url = "https://api.anthropic.com/v1/messages"
-        req_body = {
-            "model": self.model,
-            "max_tokens": self.max_tokens,
-            # Thinking runs by default on current models, but its text is omitted unless
-            # requested. "summarized" returns a readable summary (the raw chain is never exposed).
-            "thinking": {"type": "adaptive", "display": "summarized"},
-            "system": SYSTEM_PROMPT,
-            "messages": [{"role": "user", "content": user_message}]
-        }
-
-        headers = {
-            "Content-Type": "application/json",
-            "x-api-key": self.api_key,
-            "anthropic-version": "2023-06-01"
-        }
-        workspace_id = os.getenv("ANTHROPIC_WORKSPACE_ID")
-        if workspace_id:
-            headers["anthropic-workspace-id"] = workspace_id
+        req_body, headers = self.build_anthropic_request(user_message)
 
         data = json.dumps(req_body).encode("utf-8")
         req = urllib.request.Request(url, data=data, headers=headers)
@@ -378,11 +399,13 @@ class SingleTestAgentRunner:
         api_key: Optional[str] = None,
         output_dir: str = "outputs",
         max_tokens: int = DEFAULT_MAX_TOKENS,
+        task_budget: Optional[int] = DEFAULT_TASK_BUDGET,
     ):
         self.scenario_path = scenario_path
         self.max_attempts = max_attempts
         self.runner = BenchmarkRunner(scenario_path, output_dir=output_dir)
-        self.llm_client = LLMClient(provider=provider, model=model, api_key=api_key, max_tokens=max_tokens)
+        self.llm_client = LLMClient(provider=provider, model=model, api_key=api_key,
+                                    max_tokens=max_tokens, task_budget=task_budget)
         self.cost_log: list = []
 
     def _record_cost(self, attempt: int, raw_resp: Any) -> None:
@@ -405,6 +428,7 @@ class SingleTestAgentRunner:
             "provider": self.llm_client.provider,
             "model": self.llm_client.model,
             "max_tokens": self.llm_client.max_tokens,
+            "task_budget": self.llm_client.task_budget if self.llm_client.provider == "anthropic" else None,
             "passed": passed,
             "attempts_used": attempts_used,
             "total_input_tokens": sum(c["input"] for c in self.cost_log),
@@ -465,7 +489,9 @@ class SingleTestAgentRunner:
         print(f"Scenario:     {self.runner.scenario_name}")
         print(f"Provider:     {self.llm_client.provider} (Model: {self.llm_client.model})")
         print(f"Max Attempts: {self.max_attempts}")
-        print(f"Max Tokens:   {self.llm_client.max_tokens} per attempt (thinking + answer)")
+        if self.llm_client.provider == "anthropic" and self.llm_client.task_budget:
+            print(f"Task Budget:  {self.llm_client.task_budget} tokens per attempt (visible to the model)")
+        print(f"Max Tokens:   {self.llm_client.max_tokens} per attempt (hard cap, thinking + answer)")
         print("=" * 75)
 
         for attempt in range(1, self.max_attempts + 1):
@@ -477,6 +503,7 @@ class SingleTestAgentRunner:
                 "current_attempt": attempt,
                 "max_attempts": self.max_attempts,
                 "remaining_attempts": self.max_attempts - attempt + 1,
+                "token_budget_per_attempt": self.llm_client.budget_shown_to_model,
             }
 
             # 2. Call LLM
@@ -568,8 +595,15 @@ def main():
         "--max-tokens", "-t",
         type=int,
         default=DEFAULT_MAX_TOKENS,
-        help=f"Output token cap per attempt, thinking included (default: {DEFAULT_MAX_TOKENS}). "
-             "Hitting it counts as a missed attempt.",
+        help=f"Hard output token cap per attempt, thinking included, not shown to the model "
+             f"(default: {DEFAULT_MAX_TOKENS}). Hitting it counts as a missed attempt.",
+    )
+    parser.add_argument(
+        "--task-budget", "-b",
+        type=int,
+        default=DEFAULT_TASK_BUDGET,
+        help=f"Anthropic task budget per attempt: a countdown the model sees so it can pace itself "
+             f"(default: {DEFAULT_TASK_BUDGET}, minimum 20000, 0 to disable). Keep it below --max-tokens.",
     )
     parser.add_argument(
         "--api-key", "-k",
@@ -592,6 +626,7 @@ def main():
         model=args.model,
         api_key=args.api_key,
         max_tokens=args.max_tokens,
+        task_budget=args.task_budget,
     )
     success, _ = runner.run()
     sys.exit(0 if success else 1)

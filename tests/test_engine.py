@@ -234,6 +234,26 @@ def test_no_answer_counts_as_miss_and_history_stays_clean():
         shutil.rmtree(out_dir, ignore_errors=True)
 
 
+def test_task_budget_in_anthropic_request():
+    from src.llm_agent.run_single_test_agent import LLMClient, TASK_BUDGET_BETA
+    on = LLMClient(provider="anthropic", api_key="test", max_tokens=24000, task_budget=20000)
+    body, headers = on.build_anthropic_request("hi")
+    assert body["output_config"] == {"task_budget": {"type": "tokens", "total": 20000}}
+    assert headers["anthropic-beta"] == TASK_BUDGET_BETA
+    assert body["max_tokens"] == 24000 and on.budget_shown_to_model == 20000
+
+    off = LLMClient(provider="anthropic", api_key="test", max_tokens=16000, task_budget=0)
+    body, headers = off.build_anthropic_request("hi")
+    assert "output_config" not in body and "anthropic-beta" not in headers
+    assert off.budget_shown_to_model == 16000
+
+    try:
+        LLMClient(provider="anthropic", api_key="test", task_budget=5000)
+        assert False, "budgets under 20000 must be rejected"
+    except ValueError:
+        pass
+
+
 if __name__ == "__main__":
     print("Running engine unit tests...")
     tests = [(n, f) for n, f in list(globals().items()) if n.startswith("test_") and callable(f)]
