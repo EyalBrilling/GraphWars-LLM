@@ -177,6 +177,9 @@ class LLMClient:
         req_body = {
             "model": self.model,
             "max_tokens": 32768,
+            # Thinking runs by default on current models, but its text is omitted unless
+            # requested. "summarized" returns a readable summary (the raw chain is never exposed).
+            "thinking": {"type": "adaptive", "display": "summarized"},
             "system": SYSTEM_PROMPT,
             "messages": [{"role": "user", "content": user_message}]
         }
