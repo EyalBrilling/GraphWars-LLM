@@ -7,7 +7,7 @@ import urllib.request
 import urllib.parse
 import urllib.error
 from datetime import datetime
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple
 
 from src.experiments.runner import BenchmarkRunner
 from src.engine.backend.physics import TrajectoryResult
@@ -55,6 +55,75 @@ You MUST respond with ONLY a valid JSON object matching this exact schema:
 DEFAULT_TASK_BUDGET = 20000  # tokens the model is told it has per attempt (API minimum is 20,000)
 DEFAULT_MAX_TOKENS = 24000   # hard cap the API enforces (not shown to the model); headroom above the budget
 TASK_BUDGET_BETA = "task-budgets-2026-03-13"
+
+# ---------------------------------------------------------------------------
+# Prompt modes
+#   default            the normal prompt
+#   table              the model fills an options table (3 families of its own choosing)
+#   table_with_answer  the table lists 3 given families: the scenario's solution family + 2 others
+#   answer_family      the model is told the scenario's solution family
+# Modes 3 and 4 need "solution_family" in the scenario file (a key of FUNCTION_FAMILIES).
+# That field is never sent to the model directly, only through these modes.
+# ---------------------------------------------------------------------------
+PROMPT_MODES = ["default", "table", "table_with_answer", "answer_family"]
+MODES_NEEDING_SOLUTION = {"table_with_answer", "answer_family"}
+
+# Shared family descriptions, all in the same style, so no option reads as "the special one".
+FUNCTION_FAMILIES: Dict[str, str] = {
+    "waves": "Periodic waves: A*cos(w*(x-c)), optionally plus a linear trend. Oscillates with a fixed period.",
+    "steps": "Smooth steps: a sum of terms a*tanh(x-c). Each term moves the curve from -a to +a around x=c.",
+    "bumps": "Localized bumps: a sum of terms a*exp(-((x-c)/w)**2). Each term adds a bump of height a near x=c.",
+    "polynomial": "Polynomials: a + b*x + c*x**2 + ... A single smooth curve whose shape is set by its coefficients.",
+    "piecewise_linear": "Piecewise-linear: a + b*x + sum of c*abs(x-k). Straight segments that bend at each x=k.",
+}
+# Decoys are the first two families in this order that aren't the answer, so every run of a
+# scenario sees the same three options. The answer is always placed in the middle.
+DECOY_ORDER = ["waves", "bumps", "polynomial", "piecewise_linear", "steps"]
+
+ANSWER_SCHEMA_TABLE = """  "candidate_families": [
+    {"family": "<a family of functions>", "how_it_fits": "<one line>", "estimated_length": "<characters>"},
+    {"family": "<a different family>", "how_it_fits": "<one line>", "estimated_length": "<characters>"},
+    {"family": "<a third, different family>", "how_it_fits": "<one line>", "estimated_length": "<characters>"}
+  ],
+"""
+
+
+def three_options_for(solution_family: str) -> List[str]:
+    """[decoy, answer, decoy] family keys for table_with_answer."""
+    decoys = [f for f in DECOY_ORDER if f != solution_family][:2]
+    return [decoys[0], solution_family, decoys[1]]
+
+
+def build_system_prompt(mode: str = "default", solution_family: Optional[str] = None) -> str:
+    if mode not in PROMPT_MODES:
+        raise ValueError(f"Unknown prompt mode '{mode}'. Choose from: {', '.join(PROMPT_MODES)}")
+    if mode in MODES_NEEDING_SOLUTION:
+        if not solution_family:
+            raise ValueError(f"Prompt mode '{mode}' needs \"solution_family\" in the scenario file")
+        if solution_family not in FUNCTION_FAMILIES:
+            raise ValueError(f"Unknown solution_family '{solution_family}'. Known: {', '.join(FUNCTION_FAMILIES)}")
+    if mode == "default":
+        return SYSTEM_PROMPT
+
+    if mode == "table":
+        line = ("- Before committing, fill in candidate_families in your answer: three different families "
+                "of functions, how each could fit this course, and the estimated character length of each. "
+                "Then choose one for your formula.")
+    elif mode == "table_with_answer":
+        opts = three_options_for(solution_family)
+        line = ("- Before committing, evaluate these three families of functions in candidate_families, "
+                "estimate the character length each would need for this course, and then choose one for "
+                "your formula:\n" + "\n".join(f"  ({'abc'[i]}) {FUNCTION_FAMILIES[k]}" for i, k in enumerate(opts)))
+    else:  # answer_family
+        line = ("- A family of functions that fits this course: " + FUNCTION_FAMILIES[solution_family]
+                + " Use it for your formula.")
+
+    anchor = "\n\nINPUT & ATTEMPT HISTORY ANALYSIS:"
+    prompt = SYSTEM_PROMPT.replace(anchor, "\n" + line + anchor, 1)
+    if mode in ("table", "table_with_answer"):
+        schema_open = 'matching this exact schema:\n{\n'
+        prompt = prompt.replace(schema_open, schema_open + ANSWER_SCHEMA_TABLE, 1)
+    return prompt
 
 # USD per 1M tokens (input, output), Anthropic first-party list prices as of 2026-10.
 # Thinking tokens are billed as output. Unknown models get token counts but no $ figure.
@@ -116,7 +185,11 @@ class LLMClient:
     """Handles communications with LLM providers (Gemini, OpenAI, Anthropic, or Mock)."""
 
     def __init__(self, provider: str = "gemini", model: Optional[str] = None, api_key: Optional[str] = None,
-                 max_tokens: int = DEFAULT_MAX_TOKENS, task_budget: Optional[int] = DEFAULT_TASK_BUDGET):
+                 max_tokens: int = DEFAULT_MAX_TOKENS, task_budget: Optional[int] = DEFAULT_TASK_BUDGET,
+                 prompt_mode: str = "default", solution_family: Optional[str] = None):
+        self.prompt_mode = prompt_mode
+        self.solution_family = solution_family
+        self.system_prompt = build_system_prompt(prompt_mode, solution_family)
         self.provider = provider.lower()
         self.model = model or self._default_model()
         self.api_key = api_key or self._resolve_api_key()
@@ -142,7 +215,7 @@ class LLMClient:
             # Thinking runs by default on current models, but its text is omitted unless
             # requested. "summarized" returns a readable summary (the raw chain is never exposed).
             "thinking": {"type": "adaptive", "display": "summarized"},
-            "system": SYSTEM_PROMPT,
+            "system": self.system_prompt,
             "messages": [{"role": "user", "content": user_message}],
         }
         headers = {
@@ -210,7 +283,7 @@ class LLMClient:
             "contents": [
                 {
                     "role": "user",
-                    "parts": [{"text": f"{SYSTEM_PROMPT}\n\n{user_message}"}]
+                    "parts": [{"text": f"{self.system_prompt}\n\n{user_message}"}]
                 }
             ],
             "generationConfig": {
@@ -242,7 +315,7 @@ class LLMClient:
         req_body = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": self.system_prompt},
                 {"role": "user", "content": user_message}
             ],
             "response_format": {"type": "json_object"},
@@ -307,13 +380,17 @@ class LLMClient:
                     raise LLMNoAnswerError(reason, req_body, result, thinking_text)
                 try:
                     parsed = self._parse_json_response(text)
-                except ValueError:
+                except ValueError as parse_err:
                     if stop_reason == "max_tokens":
                         raise LLMNoAnswerError(
                             f"Ran out of output tokens ({self.max_tokens}) mid-answer; the JSON was cut off",
                             req_body, result, thinking_text,
                         )
-                    raise
+                    # An unreadable answer is the model's miss, not a reason to abort the run
+                    raise LLMNoAnswerError(
+                        f"Answer was not valid JSON: {str(parse_err).splitlines()[0]}",
+                        req_body, result, thinking_text,
+                    )
                 if thinking_text:
                     parsed["_thinking"] = thinking_text
                 parsed["_raw_request"] = req_body
@@ -361,7 +438,7 @@ class LLMClient:
         
         # 1. Try direct json.loads first
         try:
-            return json.loads(cleaned)
+            return json.loads(cleaned, strict=False)  # strict=False: allow raw newlines inside strings
         except Exception:
             pass
 
@@ -370,7 +447,7 @@ class LLMClient:
             match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned, re.DOTALL)
             if match:
                 try:
-                    return json.loads(match.group(1))
+                    return json.loads(match.group(1), strict=False)
                 except Exception:
                     pass
 
@@ -380,7 +457,7 @@ class LLMClient:
         if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
             json_str = cleaned[start_idx : end_idx + 1]
             try:
-                return json.loads(json_str)
+                return json.loads(json_str, strict=False)
             except Exception as e:
                 raise ValueError(f"Failed to parse JSON response from LLM: {str(e)}\nRaw output:\n{text}")
 
@@ -400,12 +477,18 @@ class SingleTestAgentRunner:
         output_dir: str = "outputs",
         max_tokens: int = DEFAULT_MAX_TOKENS,
         task_budget: Optional[int] = DEFAULT_TASK_BUDGET,
+        prompt_mode: str = "default",
     ):
         self.scenario_path = scenario_path
         self.max_attempts = max_attempts
-        self.runner = BenchmarkRunner(scenario_path, output_dir=output_dir)
+        # solution_family lives only in the scenario file; it reaches the model only via modes 3/4
+        with open(scenario_path, "r", encoding="utf-8") as f:
+            solution_family = json.load(f).get("solution_family")
+        # Build the client first so a bad mode fails before an output folder is created
         self.llm_client = LLMClient(provider=provider, model=model, api_key=api_key,
-                                    max_tokens=max_tokens, task_budget=task_budget)
+                                    max_tokens=max_tokens, task_budget=task_budget,
+                                    prompt_mode=prompt_mode, solution_family=solution_family)
+        self.runner = BenchmarkRunner(scenario_path, output_dir=output_dir)
         self.cost_log: list = []
 
     def _record_cost(self, attempt: int, raw_resp: Any) -> None:
@@ -427,6 +510,9 @@ class SingleTestAgentRunner:
         summary = {
             "provider": self.llm_client.provider,
             "model": self.llm_client.model,
+            "prompt_mode": self.llm_client.prompt_mode,
+            "solution_family_shown": (self.llm_client.solution_family
+                                      if self.llm_client.prompt_mode in MODES_NEEDING_SOLUTION else None),
             "max_tokens": self.llm_client.max_tokens,
             "task_budget": self.llm_client.task_budget if self.llm_client.provider == "anthropic" else None,
             "passed": passed,
@@ -478,6 +564,8 @@ class SingleTestAgentRunner:
                 f.write(f"--- NO ANSWER ---\n{no_answer}\n")
                 return
             f.write("--- STRUCTURED REASONING & PLAN ---\n")
+            if llm_output.get("candidate_families"):
+                f.write(f"Candidate families: {json.dumps(llm_output.get('candidate_families'), ensure_ascii=False)}\n")
             f.write(f"Reasoning: {llm_output.get('reasoning')}\n")
             f.write(f"Strategy:  {llm_output.get('strategy')}\n")
             f.write(f"Formula:   y = {llm_output.get('formula')}\n")
@@ -488,6 +576,7 @@ class SingleTestAgentRunner:
         print(f"GraphWars-LLM: Running Single Test Agent")
         print(f"Scenario:     {self.runner.scenario_name}")
         print(f"Provider:     {self.llm_client.provider} (Model: {self.llm_client.model})")
+        print(f"Prompt mode:  {self.llm_client.prompt_mode}")
         print(f"Max Attempts: {self.max_attempts}")
         if self.llm_client.provider == "anthropic" and self.llm_client.task_budget:
             print(f"Task Budget:  {self.llm_client.task_budget} tokens per attempt (visible to the model)")
@@ -526,6 +615,11 @@ class SingleTestAgentRunner:
             )
             self._record_cost(attempt, llm_response.get("_raw_response"))
 
+            families = llm_response.get("candidate_families")
+            if isinstance(families, list):
+                for fam in families:
+                    if isinstance(fam, dict):
+                        print(f"  Candidate: {fam.get('family')} | ~{fam.get('estimated_length')} chars | {fam.get('how_it_fits')}")
             print(f"  Reasoning: {llm_response.get('reasoning', 'N/A')}")
             print(f"  Strategy:  {llm_response.get('strategy', 'N/A')}")
             print(f"  Formula:   y = {llm_response.get('formula', 'N/A')}")
@@ -606,6 +700,15 @@ def main():
              f"(default: {DEFAULT_TASK_BUDGET}, minimum 20000, 0 to disable). Keep it below --max-tokens.",
     )
     parser.add_argument(
+        "--prompt-mode",
+        choices=PROMPT_MODES,
+        default="default",
+        help="1 default: normal prompt. 2 table: the model fills a table of 3 function families it picks. "
+             "3 table_with_answer: the table lists 3 given families, one being the scenario's solution_family. "
+             "4 answer_family: the model is told the solution_family. Modes 3 and 4 need solution_family "
+             "in the scenario file.",
+    )
+    parser.add_argument(
         "--api-key", "-k",
         default=None,
         help="API Key (optional, defaults to environment variable GEMINI_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY)"
@@ -619,15 +722,20 @@ def main():
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    runner = SingleTestAgentRunner(
-        scenario_path=scenario_path,
-        max_attempts=args.max_attempts,
-        provider=args.provider,
-        model=args.model,
-        api_key=args.api_key,
-        max_tokens=args.max_tokens,
-        task_budget=args.task_budget,
-    )
+    try:
+        runner = SingleTestAgentRunner(
+            scenario_path=scenario_path,
+            max_attempts=args.max_attempts,
+            provider=args.provider,
+            model=args.model,
+            api_key=args.api_key,
+            max_tokens=args.max_tokens,
+            task_budget=args.task_budget,
+            prompt_mode=args.prompt_mode,
+        )
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
     success, _ = runner.run()
     sys.exit(0 if success else 1)
 

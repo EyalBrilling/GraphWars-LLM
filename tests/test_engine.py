@@ -254,6 +254,71 @@ def test_task_budget_in_anthropic_request():
         pass
 
 
+def test_prompt_modes():
+    from src.llm_agent.run_single_test_agent import LLMClient, SYSTEM_PROMPT, FUNCTION_FAMILIES
+    def prompt(mode, fam=None):
+        return LLMClient(provider="anthropic", api_key="test", prompt_mode=mode, solution_family=fam).system_prompt
+    hist = "INPUT & ATTEMPT HISTORY ANALYSIS:"
+
+    # 1 default: unchanged, and the family field never appears
+    assert prompt("default") == SYSTEM_PROMPT == prompt("default", "steps")
+    assert "tanh" not in SYSTEM_PROMPT and '"candidate_families"' not in SYSTEM_PROMPT
+
+    # 2 table: required table first in the answer, no family named
+    t = prompt("table", "steps")
+    assert '"candidate_families"' in t and t.index('"candidate_families"') < t.index('"reasoning": "Detailed')
+    assert not any(desc in t for desc in FUNCTION_FAMILIES.values())
+
+    # 3 table_with_answer: three given options, the answer in the middle, plus the table
+    twa = prompt("table_with_answer", "steps")
+    a, b, c = twa.index("(a) Periodic waves"), twa.index("(b) " + FUNCTION_FAMILIES["steps"]), twa.index("(c) Localized bumps")
+    assert a < b < c < twa.index(hist) and '"candidate_families"' in twa
+    assert "(b) " + FUNCTION_FAMILIES["bumps"] in prompt("table_with_answer", "bumps")  # works for any family
+
+    # 4 answer_family: the family named, no table
+    af = prompt("answer_family", "steps")
+    assert FUNCTION_FAMILIES["steps"] in af and '"candidate_families"' not in af
+    assert af.index(FUNCTION_FAMILIES["steps"]) < af.index(hist)
+
+    # Modes 3/4 refuse to run without a (known) solution_family
+    for mode, fam in [("table_with_answer", None), ("answer_family", None), ("answer_family", "magic"), ("nope", "steps")]:
+        try:
+            prompt(mode, fam)
+            assert False, (mode, fam)
+        except ValueError:
+            pass
+
+
+def test_solution_family_never_reaches_payload():
+    from src.experiments.runner import BenchmarkRunner
+    scen = os.path.join(os.path.dirname(__file__), "..", "experiments", "scenarios", "scenario_7_needle_gauntlet_100.json")
+    out_dir = os.path.join("outputs", "_test_tmp_leak")
+    try:
+        r = BenchmarkRunner(scen, output_dir=out_dir)
+        assert "solution_family" not in json.dumps(r.get_current_llm_payload())
+        assert "solution_family" not in open(r.logger.scenario_file_path, encoding="utf-8").read()
+    finally:
+        shutil.rmtree(out_dir, ignore_errors=True)
+
+
+def test_parallel_runs_get_separate_folders():
+    out_dir = os.path.join("outputs", "_test_tmp_parallel")
+    try:
+        a = TestSessionLogger("same_name", {}, output_dir=out_dir)
+        b = TestSessionLogger("same_name", {}, output_dir=out_dir)
+        assert a.test_folder != b.test_folder
+        assert os.path.isdir(a.test_folder) and os.path.isdir(b.test_folder)
+    finally:
+        shutil.rmtree(out_dir, ignore_errors=True)
+
+
+def test_json_with_raw_newline_in_string_parses():
+    from src.llm_agent.run_single_test_agent import LLMClient
+    c = LLMClient(provider="anthropic", api_key="test")
+    parsed = c._parse_json_response('{"reasoning": "line one\nline two", "formula": "0*x"}')
+    assert parsed["formula"] == "0*x" and "line two" in parsed["reasoning"]
+
+
 if __name__ == "__main__":
     print("Running engine unit tests...")
     tests = [(n, f) for n, f in list(globals().items()) if n.startswith("test_") and callable(f)]

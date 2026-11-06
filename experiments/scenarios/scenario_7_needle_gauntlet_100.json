@@ -240,5 +240,6 @@
       "sqrt",
       "abs"
     ]
-  }
+  },
+  "solution_family": "steps"
 }

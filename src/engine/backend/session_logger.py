@@ -28,11 +28,19 @@ class TestSessionLogger:
     def __init__(self, test_name: str, initial_state_dict: Dict[str, Any], output_dir: str = "outputs"):
         self.test_name = test_name
         self.output_base_dir = output_dir
-        self.session_id = f"{test_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        
-        # Dedicated folder for this test run
-        self.test_folder = os.path.join(self.output_base_dir, self.session_id)
-        os.makedirs(self.test_folder, exist_ok=True)
+        # Dedicated folder for this test run. Runs started in parallel within the same second
+        # get a numeric suffix, so they never share (and overwrite) a folder.
+        base_id = f"{test_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        os.makedirs(self.output_base_dir, exist_ok=True)
+        suffix = 0
+        while True:
+            self.session_id = base_id if suffix == 0 else f"{base_id}_{suffix}"
+            self.test_folder = os.path.join(self.output_base_dir, self.session_id)
+            try:
+                os.makedirs(self.test_folder)  # atomic: fails if another run claimed it first
+                break
+            except FileExistsError:
+                suffix += 1
 
         self.initial_state = initial_state_dict
         self.history: List[TestAttemptRecord] = []
