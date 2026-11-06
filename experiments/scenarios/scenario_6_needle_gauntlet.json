@@ -1,0 +1,244 @@
+{
+  "name": "needle_gauntlet",
+  "difficulty": "very_hard",
+  "description": "Six walls with 4-unit windows alternating high/low, mines near each swing, small low target.",
+  "bounds": {
+    "x_min": -50.0,
+    "x_max": 50.0,
+    "y_min": -30.0,
+    "y_max": 30.0
+  },
+  "shooter": {
+    "name": "Player1",
+    "x": -45.0,
+    "y": 0.0,
+    "radius": 0.8
+  },
+  "targets": [
+    {
+      "id": "target_1",
+      "x": 45.0,
+      "y": -18.0,
+      "radius": 0.7,
+      "is_alive": true
+    }
+  ],
+  "obstacles": [
+    {
+      "id": "wall_1_top",
+      "type": "box",
+      "name": "Wall_1_Top",
+      "bounding_box": {
+        "x_min": -34,
+        "x_max": -31,
+        "y_min": 16,
+        "y_max": 30.0
+      }
+    },
+    {
+      "id": "wall_1_bot",
+      "type": "box",
+      "name": "Wall_1_Bottom",
+      "bounding_box": {
+        "x_min": -34,
+        "x_max": -31,
+        "y_min": -30.0,
+        "y_max": 12
+      }
+    },
+    {
+      "id": "mine_1",
+      "type": "circle",
+      "name": "Mine_1",
+      "bounding_box": {
+        "x_min": -28.2,
+        "x_max": -23.8,
+        "y_min": 3.8,
+        "y_max": 8.2
+      }
+    },
+    {
+      "id": "wall_2_top",
+      "type": "box",
+      "name": "Wall_2_Top",
+      "bounding_box": {
+        "x_min": -21,
+        "x_max": -18,
+        "y_min": -15,
+        "y_max": 30.0
+      }
+    },
+    {
+      "id": "wall_2_bot",
+      "type": "box",
+      "name": "Wall_2_Bottom",
+      "bounding_box": {
+        "x_min": -21,
+        "x_max": -18,
+        "y_min": -30.0,
+        "y_max": -19
+      }
+    },
+    {
+      "id": "mine_2",
+      "type": "circle",
+      "name": "Mine_2",
+      "bounding_box": {
+        "x_min": -15.2,
+        "x_max": -10.8,
+        "y_min": -10.2,
+        "y_max": -5.8
+      }
+    },
+    {
+      "id": "wall_3_top",
+      "type": "box",
+      "name": "Wall_3_Top",
+      "bounding_box": {
+        "x_min": -8,
+        "x_max": -5,
+        "y_min": 9,
+        "y_max": 30.0
+      }
+    },
+    {
+      "id": "wall_3_bot",
+      "type": "box",
+      "name": "Wall_3_Bottom",
+      "bounding_box": {
+        "x_min": -8,
+        "x_max": -5,
+        "y_min": -30.0,
+        "y_max": 5
+      }
+    },
+    {
+      "id": "mine_3",
+      "type": "circle",
+      "name": "Mine_3",
+      "bounding_box": {
+        "x_min": -2.2,
+        "x_max": 2.2,
+        "y_min": 3.8,
+        "y_max": 8.2
+      }
+    },
+    {
+      "id": "wall_4_top",
+      "type": "box",
+      "name": "Wall_4_Top",
+      "bounding_box": {
+        "x_min": 5,
+        "x_max": 8,
+        "y_min": -9,
+        "y_max": 30.0
+      }
+    },
+    {
+      "id": "wall_4_bot",
+      "type": "box",
+      "name": "Wall_4_Bottom",
+      "bounding_box": {
+        "x_min": 5,
+        "x_max": 8,
+        "y_min": -30.0,
+        "y_max": -13
+      }
+    },
+    {
+      "id": "mine_4",
+      "type": "circle",
+      "name": "Mine_4",
+      "bounding_box": {
+        "x_min": 10.8,
+        "x_max": 15.2,
+        "y_min": -6.2,
+        "y_max": -1.7999999999999998
+      }
+    },
+    {
+      "id": "wall_5_top",
+      "type": "box",
+      "name": "Wall_5_Top",
+      "bounding_box": {
+        "x_min": 18,
+        "x_max": 21,
+        "y_min": 20,
+        "y_max": 30.0
+      }
+    },
+    {
+      "id": "wall_5_bot",
+      "type": "box",
+      "name": "Wall_5_Bottom",
+      "bounding_box": {
+        "x_min": 18,
+        "x_max": 21,
+        "y_min": -30.0,
+        "y_max": 16
+      }
+    },
+    {
+      "id": "mine_5",
+      "type": "circle",
+      "name": "Mine_5",
+      "bounding_box": {
+        "x_min": 23.8,
+        "x_max": 28.2,
+        "y_min": 9.8,
+        "y_max": 14.2
+      }
+    },
+    {
+      "id": "wall_6_top",
+      "type": "box",
+      "name": "Wall_6_Top",
+      "bounding_box": {
+        "x_min": 31,
+        "x_max": 34,
+        "y_min": -3,
+        "y_max": 30.0
+      }
+    },
+    {
+      "id": "wall_6_bot",
+      "type": "box",
+      "name": "Wall_6_Bottom",
+      "bounding_box": {
+        "x_min": 31,
+        "x_max": 34,
+        "y_min": -30.0,
+        "y_max": -7
+      }
+    },
+    {
+      "id": "mine_6",
+      "type": "circle",
+      "name": "Mine_6",
+      "bounding_box": {
+        "x_min": 38.0,
+        "x_max": 42.0,
+        "y_min": -9.0,
+        "y_max": -5.0
+      }
+    }
+  ],
+  "constraints": {
+    "max_formula_characters": 180,
+    "variable": "x",
+    "allowed_operators": [
+      "+",
+      "-",
+      "*",
+      "/",
+      "**",
+      "sin",
+      "cos",
+      "tan",
+      "exp",
+      "log",
+      "sqrt",
+      "abs"
+    ]
+  }
+}
