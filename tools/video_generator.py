@@ -33,6 +33,7 @@ if PROJECT_ROOT not in sys.path:
 from src.engine.backend.space import CoordinateBounds, Shooter, Target
 from src.engine.backend.obstacles import BoxObstacle, CircleObstacle, PolygonObstacle, TerrainObstacle
 from src.engine.backend.game_state import GameState
+from src.engine.ui.icons import draw_goal_icon, draw_hit_area, draw_start_icon, icon_size, model_label_for_run
 
 
 BG = "#0F172A"
@@ -50,6 +51,7 @@ def draw_arena(
     shooter: Shooter,
     targets: List[Target],
     obstacles: List[Any],
+    shooter_label: Optional[str] = None,
 ):
     """Draw the static arena environment (background, grid, obstacles, shooter, targets)."""
     ax.clear()
@@ -88,25 +90,22 @@ def draw_arena(
                 linewidth=1.5, edgecolor="#475569", facecolor="#1E293B", zorder=2,
             ))
 
-    ax.add_patch(patches.Circle(
-        (shooter.position.x, shooter.position.y), shooter.radius,
-        linewidth=2, edgecolor=ACCENT, facecolor="#0284C7", zorder=5,
-    ))
-    ax.text(
-        shooter.position.x, shooter.position.y - shooter.radius - 1.6, shooter.name,
-        color=ACCENT, fontsize=8, fontweight="bold", ha="center", va="top", zorder=5,
-    )
+    # Start: robot emoji labeled with the model; dashed circle = real start radius
+    sx, sy = shooter.position.x, shooter.position.y
+    s_size = icon_size(bounds, shooter.radius)
+    draw_hit_area(ax, sx, sy, shooter.radius, ACCENT)
+    draw_start_icon(ax, sx, sy, s_size, zorder=6)
+    ax.text(sx, sy - 0.6 * s_size, shooter_label or shooter.name,
+            color=ACCENT, fontsize=9, fontweight="bold", ha="center", va="top", zorder=12)
 
+    # Goal: the cake; dashed circle = real hit radius
     for t in targets:
-        color = SUCCESS if t.is_alive else FAIL
-        ax.add_patch(patches.Circle(
-            (t.position.x, t.position.y), t.radius,
-            linewidth=2, edgecolor=color, facecolor="#15803D" if t.is_alive else "#991B1B", zorder=5,
-        ))
-        ax.text(
-            t.position.x, t.position.y - t.radius - 1.6, "Target",
-            color=color, fontsize=8, fontweight="bold", ha="center", va="top", zorder=5,
-        )
+        tx, ty = t.position.x, t.position.y
+        t_size = icon_size(bounds, t.radius)
+        draw_hit_area(ax, tx, ty, t.radius, SUCCESS)
+        draw_goal_icon(ax, tx, ty, t_size, zorder=6)
+        ax.text(tx, ty - 0.6 * t_size, "Cake",
+                color=SUCCESS, fontsize=9, fontweight="bold", ha="center", va="top", zorder=12)
 
 
 def draw_header(fig: plt.Figure, attempt_num: int, total: int, strategy: str, formula: str,
@@ -182,6 +181,7 @@ def generate_trajectory_video(
     # Same loader as the runner, so rules and obstacles match
     state = GameState.from_dict(initial_state)
     bounds, shooter, targets, obstacles = state.bounds, state.shooter, state.targets, state.obstacles
+    shooter_label = model_label_for_run(output_dir)
 
     fig, ax = plt.subplots(figsize=(12, 7.5), dpi=100)
     fig.patch.set_facecolor(BG)
@@ -215,7 +215,7 @@ def generate_trajectory_video(
 
         # Animate the projectile at constant x-speed
         for idx_end in frame_end_indices(x_vals, dx_per_frame):
-            draw_arena(ax, bounds, shooter, targets, obstacles)
+            draw_arena(ax, bounds, shooter, targets, obstacles, shooter_label)
             if wx:
                 ax.plot(wx, wy, "o--", color="#F59E0B", alpha=0.45, linewidth=1, markersize=4, zorder=3)
             ax.plot(x_vals[: idx_end + 1], y_vals[: idx_end + 1], color=ACCENT, linewidth=2.5, alpha=0.95, zorder=4)
@@ -235,12 +235,13 @@ def generate_trajectory_video(
             label = hit_obstacle or sim_res.get("hit_type", "miss").replace("_", " ")
             outcome_text, outcome_color, marker, msize = f"MISS · {label}", FAIL, "X", 14
 
-        draw_arena(ax, bounds, shooter, targets, obstacles)
+        draw_arena(ax, bounds, shooter, targets, obstacles, shooter_label)
         if wx:
             ax.plot(wx, wy, "o--", color="#F59E0B", alpha=0.35, linewidth=1, markersize=4, zorder=3)
         ax.plot(x_vals, y_vals, color=outcome_color if is_success else ACCENT, linewidth=2.8, alpha=0.95, zorder=4)
-        ax.plot(x_vals[-1], y_vals[-1], marker, color=outcome_color, markersize=msize,
-                markeredgecolor="white", markeredgewidth=1.2, zorder=8)
+        if not is_success:  # on a hit the path ending in the cake says it; a star would cover the icon
+            ax.plot(x_vals[-1], y_vals[-1], marker, color=outcome_color, markersize=msize,
+                    markeredgecolor="white", markeredgewidth=1.2, zorder=8)
         header = draw_header(fig, attempt_num, total_attempts, strategy, formula_str, outcome_text, outcome_color)
         hold = capture(fig)
         for a in header:

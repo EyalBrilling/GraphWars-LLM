@@ -9,6 +9,7 @@ from src.engine.backend.space import CoordinateBounds, Shooter, Target, Point2D
 from src.engine.backend.obstacles import BaseObstacle, CircleObstacle, BoxObstacle, PolygonObstacle, TerrainObstacle
 from src.engine.backend.physics import TrajectoryResult, HitType
 from src.engine.backend.game_state import GameState
+from src.engine.ui.icons import draw_goal_icon, draw_hit_area, draw_start_icon, icon_size
 
 
 class ArenaRenderer:
@@ -26,6 +27,7 @@ class ArenaRenderer:
         current_result: Optional[TrajectoryResult] = None,
         waypoints: Optional[List[Point2D]] = None,
         attempt_label: Optional[str] = None,
+        shooter_label: Optional[str] = None,
     ):
         """Draw the entire scene with optional planned waypoints."""
         self.ax.clear()
@@ -74,59 +76,26 @@ class ArenaRenderer:
                 zorder=4,
             )
 
-        # 3. Draw Shooter
-        shooter_circle = Circle(
-            (state.shooter.position.x, state.shooter.position.y),
-            state.shooter.radius,
-            facecolor="#38BDF8",
-            edgecolor="#FFFFFF",
-            linewidth=1.5,
-            zorder=5,
-            label=f"Shooter ({state.shooter.name})"
-        )
-        self.ax.add_patch(shooter_circle)
+        # 3. Draw Shooter (robot icon; dashed circle = real start radius)
+        sx, sy = state.shooter.position.x, state.shooter.position.y
+        s_size = icon_size(state.bounds, state.shooter.radius)
+        draw_hit_area(self.ax, sx, sy, state.shooter.radius, "#38BDF8")
+        draw_start_icon(self.ax, sx, sy, s_size, zorder=6)
         self.ax.text(
-            state.shooter.position.x,
-            state.shooter.position.y + state.shooter.radius + 0.5,
-            state.shooter.name,
-            color="#38BDF8",
-            fontsize=9,
-            fontweight="bold",
-            ha="center",
-            zorder=6
+            sx, sy - 0.55 * s_size, shooter_label or state.shooter.name,
+            color="#38BDF8", fontsize=9, fontweight="bold", ha="center", va="top", zorder=12,
         )
 
-        # 4. Draw Targets
+        # 4. Draw Targets (cake icon; dashed circle = real hit radius)
         for target in state.targets:
-            color = "#EF4444" if target.is_alive else "#6B7280"
-            alpha = 1.0 if target.is_alive else 0.4
-            target_circle = Circle(
-                (target.position.x, target.position.y),
-                target.radius,
-                facecolor=color,
-                edgecolor="#FCA5A5" if target.is_alive else "#9CA3AF",
-                linewidth=1.8,
-                alpha=alpha,
-                zorder=5,
-            )
-            self.ax.add_patch(target_circle)
-            inner_ring = Circle(
-                (target.position.x, target.position.y),
-                target.radius * 0.4,
-                facecolor="#FFFFFF",
-                alpha=alpha,
-                zorder=6,
-            )
-            self.ax.add_patch(inner_ring)
+            tx, ty = target.position.x, target.position.y
+            t_size = icon_size(state.bounds, target.radius)
+            color = "#22C55E" if target.is_alive else "#6B7280"
+            draw_hit_area(self.ax, tx, ty, target.radius, color)
+            draw_goal_icon(self.ax, tx, ty, t_size, zorder=6)
             self.ax.text(
-                target.position.x,
-                target.position.y + target.radius + 0.5,
-                f"{target.id} {'[ALIVE]' if target.is_alive else '[HIT]'}",
-                color=color,
-                fontsize=9,
-                fontweight="bold",
-                ha="center",
-                zorder=6
+                tx, ty - 0.55 * t_size, "Cake" if target.is_alive else "Cake [eaten]",
+                color=color, fontsize=9, fontweight="bold", ha="center", va="top", zorder=12,
             )
 
         # 5. Draw Trajectory History (Faded)
@@ -146,7 +115,7 @@ class ArenaRenderer:
             self.ax.plot(xs, ys, color=traj_color, linewidth=2.4, alpha=0.95, zorder=5, label=f"y = {active_res.formula_str}")
 
             # Impact point marker
-            if active_res.hit_coordinate:
+            if active_res.hit_coordinate and not active_res.is_success:  # on a hit, don't cover the cake
                 marker_color = "#22C55E" if active_res.is_success else "#EF4444"
                 marker_symbol = "*" if active_res.is_success else "X"
                 self.ax.plot(

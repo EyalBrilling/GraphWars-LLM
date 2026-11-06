@@ -15,6 +15,7 @@ from src.engine.backend.space import Point2D
 from src.engine.backend.game_state import GameState
 from src.engine.backend.session_logger import TestSessionLogger
 from src.engine.ui.renderer import ArenaRenderer
+from src.engine.ui.icons import model_label_for_run
 
 
 class GraphWarApp:
@@ -35,6 +36,7 @@ class GraphWarApp:
         # History playback state
         self.playback_mode = False
         self.loaded_session_data: Optional[Dict[str, Any]] = None
+        self.loaded_model_label: Optional[str] = None
         self.current_attempt_idx = 0
         self.total_attempts = 0
 
@@ -357,6 +359,7 @@ class GraphWarApp:
                 data = json.load(f)
 
             self.loaded_session_data = data
+            self.loaded_model_label = model_label_for_run(os.path.dirname(os.path.abspath(filepath)))
             self.playback_mode = True
             self.mode_lbl.config(text="[HISTORY PLAYBACK]", fg="#A855F7")
             self.current_attempt_idx = 0
@@ -445,6 +448,7 @@ class GraphWarApp:
             current_result=res,
             waypoints=waypoints,
             attempt_label=attempt_title,
+            shooter_label=self.loaded_model_label,
         )
         self.canvas.draw()
 
