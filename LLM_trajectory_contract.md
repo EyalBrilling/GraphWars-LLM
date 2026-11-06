@@ -90,9 +90,14 @@ The current arena state and the previous history of attempts (loaded from the te
    - Use `*` for multiplication (e.g. `2 * x`, NOT `2x`).
    - Use `**` or `^` for exponentiation (e.g. `x**2` or `x^2`).
    - Supported functions: `sin(x)`, `cos(x)`, `tan(x)`, `exp(x)`, `log(x)`, `sqrt(x)`, `abs(x)`, `pi`, `e`.
-3. **Boundary Condition:** At $x = x_{\text{shooter}}$, $f(x_{\text{shooter}})$ must be close to $y_{\text{shooter}}$ (within shooter radius).
+3. **Boundary Condition:** At $x = x_{\text{shooter}}$, $f(x_{\text{shooter}})$ must be within the shooter radius of $y_{\text{shooter}}$. Enforced: otherwise `hit_type = "invalid_start"`.
 4. **Target Condition:** At $x = x_{\text{target}}$, $f(x_{\text{target}})$ should arrive inside the target's bounding radius $[y_T - r_T, y_T + r_T]$.
-5. **Length Cap:** The formula string must not exceed `max_formula_characters` (default: 120 chars).
+5. **Length Cap:** The formula string must not exceed `max_formula_characters` (taken from the scenario; default 120). Enforced: otherwise `hit_type = "invalid_formula"`.
+6. **Allowed Syntax:** Only numbers, `x`, `pi`, `e`, `+ - * / ** %` and calls to supported functions. Anything else (attributes, strings, other names) is rejected as `invalid_formula`.
+
+### Obstacle Geometry
+
+`box` and `circle` obstacles are fully described by `bounding_box`. `polygon` obstacles also carry `vertices: [{x, y}, ...]`, and `terrain` obstacles carry `points: [{x, y}, ...]` (a ground polyline; everything below it is solid).
 
 ---
 

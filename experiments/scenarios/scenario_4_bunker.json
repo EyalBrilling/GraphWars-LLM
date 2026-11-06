@@ -42,8 +42,8 @@
       "bounding_box": {
         "x_min": 14.0,
         "x_max": 15.0,
-        "y_min": -15.0,
-        "y_max": 0.0
+        "y_min": 0.0,
+        "y_max": 10.0
       }
     },
     {

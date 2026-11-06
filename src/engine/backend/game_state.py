@@ -2,14 +2,28 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any
 
 from src.engine.backend.space import Point2D, CoordinateBounds, Shooter, Target
-from src.engine.backend.obstacles import BaseObstacle, CircleObstacle, BoxObstacle, TerrainObstacle
+from src.engine.backend.obstacles import (
+    BaseObstacle, CircleObstacle, BoxObstacle, TerrainObstacle, obstacle_from_dict, obstacle_to_dict,
+)
 from src.engine.backend.physics import TrajectoryEvaluator, TrajectoryResult, HitType
+
+
+DEFAULT_MAX_FORMULA_CHARACTERS = 120
+DEFAULT_ALLOWED_OPERATORS = ["+", "-", "*", "/", "**", "sin", "cos", "tan", "exp", "log", "sqrt", "abs"]
+
+
+def default_constraints() -> Dict[str, Any]:
+    return {
+        "max_formula_characters": DEFAULT_MAX_FORMULA_CHARACTERS,
+        "variable": "x",
+        "allowed_operators": list(DEFAULT_ALLOWED_OPERATORS),
+    }
 
 
 class GameState:
     """
     Encapsulates the entire 2D Graphwar arena state:
-    bounds, shooter, targets, obstacles, and shot history.
+    bounds, shooter, targets, obstacles, formula constraints, and shot history.
     """
 
     def __init__(
@@ -18,23 +32,58 @@ class GameState:
         shooter: Optional[Shooter] = None,
         targets: Optional[List[Target]] = None,
         obstacles: Optional[List[BaseObstacle]] = None,
+        constraints: Optional[Dict[str, Any]] = None,
     ):
         self.bounds = bounds or CoordinateBounds(x_min=-25.0, x_max=25.0, y_min=-15.0, y_max=15.0)
         self.shooter = shooter or Shooter(name="Player1", position=Point2D(-20.0, 0.0))
         self.targets = targets or [Target(id="target_1", position=Point2D(20.0, 0.0))]
         self.obstacles = obstacles or []
+        self.constraints = {**default_constraints(), **(constraints or {})}
         self.history: List[TrajectoryResult] = []
+
+    @property
+    def max_formula_characters(self) -> Optional[int]:
+        return self.constraints.get("max_formula_characters")
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "GameState":
+        """Build a GameState from a scenario JSON / contract dict (scenario files, history.json initial_state)."""
+        b = data["bounds"]
+        bounds = CoordinateBounds(x_min=b["x_min"], x_max=b["x_max"], y_min=b["y_min"], y_max=b["y_max"])
+        s = data["shooter"]
+        shooter = Shooter(
+            name=s.get("name", "Player1"),
+            position=Point2D(s["x"], s["y"]),
+            radius=s.get("radius", 0.6),
+        )
+        targets = [
+            Target(
+                id=t["id"],
+                position=Point2D(t["x"], t["y"]),
+                radius=t.get("radius", 0.8),
+                is_alive=t.get("is_alive", True),
+            )
+            for t in data["targets"]
+        ]
+        obstacles = [obstacle_from_dict(o) for o in data.get("obstacles", [])]
+        return cls(
+            bounds=bounds,
+            shooter=shooter,
+            targets=targets,
+            obstacles=obstacles,
+            constraints=data.get("constraints"),
+        )
 
     def add_obstacle(self, obstacle: BaseObstacle) -> None:
         self.obstacles.append(obstacle)
 
-    def fire_formula(self, formula_str: str, step_size: float = 0.05) -> TrajectoryResult:
-        """Evaluate a mathematical formula shot and update state."""
+    def evaluate_formula(self, formula_str: str, step_size: float = 0.05) -> TrajectoryResult:
+        """Simulate a shot under this arena's rules without changing any state."""
         # Determine firing direction based on target position relative to shooter
         main_target = [t for t in self.targets if t.is_alive][0] if any(t.is_alive for t in self.targets) else self.targets[0]
         direction = 1 if main_target.position.x >= self.shooter.position.x else -1
 
-        result = TrajectoryEvaluator.evaluate(
+        return TrajectoryEvaluator.evaluate(
             formula_str=formula_str,
             shooter=self.shooter,
             targets=self.targets,
@@ -42,7 +91,12 @@ class GameState:
             bounds=self.bounds,
             step_size=step_size,
             direction=direction,
+            max_formula_characters=self.max_formula_characters,
         )
+
+    def fire_formula(self, formula_str: str, step_size: float = 0.05) -> TrajectoryResult:
+        """Evaluate a mathematical formula shot and update state."""
+        result = self.evaluate_formula(formula_str, step_size=step_size)
 
         if result.is_success and result.hit_target_id:
             for t in self.targets:
@@ -83,7 +137,7 @@ class GameState:
 
         return "\n".join(lines)
 
-    def to_contract_dict(self, max_formula_characters: int = 120) -> Dict[str, Any]:
+    def to_contract_dict(self) -> Dict[str, Any]:
         """Serialize current state to the exact LLM trajectory contract schema."""
         return {
             "bounds": {
@@ -108,26 +162,11 @@ class GameState:
                 }
                 for t in self.targets
             ],
-            "obstacles": [
-                {
-                    "id": f"obs_{i+1}",
-                    "type": obs.__class__.__name__.replace("Obstacle", "").lower(),
-                    "name": obs.name,
-                    "bounding_box": {
-                        "x_min": obs.get_bounding_box()[0],
-                        "x_max": obs.get_bounding_box()[1],
-                        "y_min": obs.get_bounding_box()[2],
-                        "y_max": obs.get_bounding_box()[3],
-                    },
-                }
-                for i, obs in enumerate(self.obstacles)
-            ],
+            "obstacles": [obstacle_to_dict(obs, f"obs_{i+1}") for i, obs in enumerate(self.obstacles)],
             "constraints": {
-                "max_formula_characters": max_formula_characters,
-                "variable": "x",
-                "allowed_operators": [
-                    "+", "-", "*", "/", "**", "sin", "cos", "tan", "exp", "log", "sqrt", "abs"
-                ],
+                "max_formula_characters": self.constraints.get("max_formula_characters"),
+                "variable": self.constraints.get("variable", "x"),
+                "allowed_operators": list(self.constraints.get("allowed_operators", DEFAULT_ALLOWED_OPERATORS)),
             },
             "history": [
                 {

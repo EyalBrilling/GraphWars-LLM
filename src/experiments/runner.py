@@ -1,9 +1,7 @@
 import os
 import json
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any
 
-from src.engine.backend.space import Point2D, CoordinateBounds, Shooter, Target
-from src.engine.backend.obstacles import BaseObstacle, CircleObstacle, BoxObstacle, PolygonObstacle
 from src.engine.backend.game_state import GameState
 from src.engine.backend.session_logger import TestSessionLogger
 from src.engine.backend.physics import TrajectoryResult
@@ -16,59 +14,7 @@ class ScenarioLoader:
     def load_scenario(scenario_path: str) -> GameState:
         with open(scenario_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-
-        bounds = CoordinateBounds(
-            x_min=data["bounds"]["x_min"],
-            x_max=data["bounds"]["x_max"],
-            y_min=data["bounds"]["y_min"],
-            y_max=data["bounds"]["y_max"],
-        )
-
-        shooter = Shooter(
-            name=data["shooter"]["name"],
-            position=Point2D(data["shooter"]["x"], data["shooter"]["y"]),
-            radius=data["shooter"].get("radius", 0.6),
-        )
-
-        targets = [
-            Target(
-                id=t["id"],
-                position=Point2D(t["x"], t["y"]),
-                radius=t.get("radius", 0.8),
-                is_alive=t.get("is_alive", True),
-            )
-            for t in data["targets"]
-        ]
-
-        obstacles: List[BaseObstacle] = []
-        for obs in data.get("obstacles", []):
-            obs_type = obs.get("type", "box")
-            name = obs.get("name", "obstacle")
-            if obs_type == "box":
-                bbox = obs["bounding_box"]
-                obstacles.append(
-                    BoxObstacle(
-                        x_min=bbox["x_min"],
-                        x_max=bbox["x_max"],
-                        y_min=bbox["y_min"],
-                        y_max=bbox["y_max"],
-                        name=name,
-                    )
-                )
-            elif obs_type == "circle":
-                bbox = obs["bounding_box"]
-                center_x = (bbox["x_min"] + bbox["x_max"]) / 2.0
-                center_y = (bbox["y_min"] + bbox["y_max"]) / 2.0
-                radius = (bbox["x_max"] - bbox["x_min"]) / 2.0
-                obstacles.append(
-                    CircleObstacle(
-                        center=Point2D(center_x, center_y),
-                        radius=radius,
-                        name=name,
-                    )
-                )
-
-        return GameState(bounds=bounds, shooter=shooter, targets=targets, obstacles=obstacles)
+        return GameState.from_dict(data)
 
 
 class BenchmarkRunner:

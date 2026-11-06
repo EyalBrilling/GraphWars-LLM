@@ -5,7 +5,7 @@ import shutil
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.engine.backend.space import Point2D, CoordinateBounds, Shooter, Target
-from src.engine.backend.obstacles import CircleObstacle, BoxObstacle, PolygonObstacle
+from src.engine.backend.obstacles import CircleObstacle, BoxObstacle, PolygonObstacle, TerrainObstacle
 from src.engine.backend.physics import TrajectoryEvaluator, HitType
 from src.engine.backend.game_state import GameState
 from src.engine.backend.session_logger import TestSessionLogger
@@ -103,13 +103,107 @@ def test_session_logger_history():
     assert os.path.exists(logger.history_file_path)
 
 
+    shutil.rmtree(logger.test_folder, ignore_errors=True)
+
+
+def test_length_cap_enforced():
+    state = GameState.create_preset("direct_shot")
+    state.constraints["max_formula_characters"] = 10
+    result = state.fire_formula("0 + 0 * x + 0 * x")  # 17 chars
+    assert result.hit_type == HitType.INVALID_FORMULA
+    assert "limit is 10" in result.error_message
+    assert state.fire_formula("0*x").is_success
+
+
+def test_invalid_start_rejected():
+    state = GameState.create_preset("direct_shot")  # shooter at (-20, 0), radius 0.6
+    result = state.fire_formula("5")
+    assert result.hit_type == HitType.INVALID_START
+    assert not result.is_success
+    # Within radius is fine
+    assert state.fire_formula("0.5 + 0*x").hit_type != HitType.INVALID_START
+
+
+def test_unsafe_formulas_rejected():
+    state = GameState.create_preset("direct_shot")
+    for bad in [
+        "().__class__.__bases__[0].__subclasses__()",
+        "__import__('os')",
+        "x.real",
+        "'abc'",
+        "[x][0]",
+        "lambda: 0",
+        "sin",
+        "foo(x)",
+        "y + 1",
+        "2x",
+    ]:
+        res = state.fire_formula(bad)
+        assert res.hit_type == HitType.INVALID_FORMULA, (bad, res.hit_type, res.error_message)
+
+
+def test_huge_power_does_not_hang():
+    state = GameState.create_preset("direct_shot")
+    res = state.fire_formula("0*x + 9**9**9")
+    assert res.hit_type == HitType.MATH_ERROR
+
+
+def test_no_tunneling_through_thin_obstacle():
+    # Steep step from y=0 to y=10 near x=-4.97 crosses a 0.2-thick bar between two regular samples.
+    state = GameState(
+        bounds=CoordinateBounds(-25, 25, -15, 15),
+        shooter=Shooter("Player1", Point2D(-20, 0)),
+        targets=[Target("target_1", Point2D(20, 10))],
+        obstacles=[BoxObstacle(x_min=-10, x_max=10, y_min=4.9, y_max=5.1, name="Thin_Bar")],
+    )
+    res = state.fire_formula("5 * (1 + tanh(20 * (x + 4.97)))")
+    assert res.hit_type == HitType.OBSTACLE
+    assert res.hit_obstacle_name == "Thin_Bar"
+
+
+def test_scenario_constraints_reach_payload():
+    from src.experiments.runner import BenchmarkRunner
+    scen = os.path.join(os.path.dirname(__file__), "..", "experiments", "scenarios", "scenario_5_random_gauntlet.json")
+    runner = BenchmarkRunner(scen, output_dir=os.path.join("outputs", "_test_tmp"))
+    try:
+        payload = runner.get_current_llm_payload()
+        assert payload["constraints"]["max_formula_characters"] == 180
+        assert runner.game_state.max_formula_characters == 180
+    finally:
+        shutil.rmtree(os.path.join("outputs", "_test_tmp"), ignore_errors=True)
+
+
+def test_polygon_and_terrain_roundtrip():
+    state = GameState(
+        obstacles=[
+            PolygonObstacle([Point2D(0, 0), Point2D(4, 0), Point2D(2, 5)], name="Tri"),
+            TerrainObstacle([Point2D(-25, -10), Point2D(0, -5), Point2D(25, -10)], name="Ground"),
+        ]
+    )
+    d = state.to_contract_dict()
+    assert d["obstacles"][0]["type"] == "polygon" and len(d["obstacles"][0]["vertices"]) == 3
+    assert d["obstacles"][1]["type"] == "terrain" and len(d["obstacles"][1]["points"]) == 3
+    loaded = GameState.from_dict(d)
+    assert isinstance(loaded.obstacles[0], PolygonObstacle)
+    assert isinstance(loaded.obstacles[1], TerrainObstacle)
+    assert loaded.obstacles[0].contains_point(Point2D(2, 1))
+    assert loaded.obstacles[1].contains_point(Point2D(0, -6))
+
+
+def test_unknown_obstacle_type_raises():
+    d = GameState.create_preset("direct_shot").to_contract_dict()
+    d["obstacles"] = [{"type": "blob", "name": "X", "bounding_box": {"x_min": 0, "x_max": 1, "y_min": 0, "y_max": 1}}]
+    try:
+        GameState.from_dict(d)
+        assert False, "expected ValueError"
+    except ValueError as e:
+        assert "blob" in str(e)
+
+
 if __name__ == "__main__":
     print("Running engine unit tests...")
-    test_space_and_bounds()
-    test_circle_obstacle()
-    test_box_obstacle()
-    test_direct_hit_trajectory()
-    test_obstacle_collision()
-    test_arc_over_obstacle()
-    test_session_logger_history()
-    print("All engine tests passed successfully! [OK]")
+    tests = [(n, f) for n, f in list(globals().items()) if n.startswith("test_") and callable(f)]
+    for name, fn in tests:
+        fn()
+        print(f"  [OK] {name}")
+    print(f"All {len(tests)} engine tests passed successfully! [OK]")

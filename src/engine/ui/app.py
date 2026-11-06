@@ -11,8 +11,7 @@ matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-from src.engine.backend.space import Point2D, CoordinateBounds, Shooter, Target
-from src.engine.backend.obstacles import BoxObstacle, CircleObstacle, PolygonObstacle
+from src.engine.backend.space import Point2D
 from src.engine.backend.game_state import GameState
 from src.engine.backend.session_logger import TestSessionLogger
 from src.engine.ui.renderer import ArenaRenderer
@@ -363,53 +362,8 @@ class GraphWarApp:
             self.current_attempt_idx = 0
             self.total_attempts = len(data.get("history", []))
 
-            # Reconstruct initial game state
-            init_st = data.get("initial_state", {})
-            bounds = CoordinateBounds(
-                x_min=init_st["bounds"]["x_min"],
-                x_max=init_st["bounds"]["x_max"],
-                y_min=init_st["bounds"]["y_min"],
-                y_max=init_st["bounds"]["y_max"],
-            )
-            shooter = Shooter(
-                name=init_st["shooter"]["name"],
-                position=Point2D(init_st["shooter"]["x"], init_st["shooter"]["y"]),
-                radius=init_st["shooter"].get("radius", 0.6),
-            )
-            targets = [
-                Target(
-                    id=t["id"],
-                    position=Point2D(t["x"], t["y"]),
-                    radius=t.get("radius", 0.8),
-                    is_alive=t.get("is_alive", True),
-                )
-                for t in init_st.get("targets", [])
-            ]
-            obstacles = []
-            for obs in init_st.get("obstacles", []):
-                bbox = obs.get("bounding_box", {})
-                obs_type = obs.get("type", "box")
-                if obs_type == "box":
-                    obstacles.append(
-                        BoxObstacle(
-                            x_min=bbox["x_min"],
-                            x_max=bbox["x_max"],
-                            y_min=bbox["y_min"],
-                            y_max=bbox["y_max"],
-                            name=obs.get("name", "obstacle"),
-                        )
-                    )
-                elif obs_type == "circle":
-                    cx = (bbox["x_min"] + bbox["x_max"]) / 2.0
-                    cy = (bbox["y_min"] + bbox["y_max"]) / 2.0
-                    r = (bbox["x_max"] - bbox["x_min"]) / 2.0
-                    obstacles.append(
-                        CircleObstacle(center=Point2D(cx, cy), radius=r, name=obs.get("name", "obs"))
-                    )
-
-            self.game_state = GameState(
-                bounds=bounds, shooter=shooter, targets=targets, obstacles=obstacles
-            )
+            # Reconstruct initial game state (incl. constraints and all obstacle types)
+            self.game_state = GameState.from_dict(data.get("initial_state", {}))
             self.renderer.bounds = self.game_state.bounds
 
             self._show_attempt(self.current_attempt_idx)
@@ -429,9 +383,10 @@ class GraphWarApp:
         sim_res = history_item.get("simulation_result", {})
         formula = llm_out.get("formula", "")
 
-        # Compute trajectory result for this attempt
+        # Compute trajectory result for this attempt (non-mutating, so a hit in one
+        # attempt doesn't mark the target destroyed when stepping to another)
         self.game_state.history.clear()
-        res = self.game_state.fire_formula(formula)
+        res = self.game_state.evaluate_formula(formula)
 
         # Parse waypoints
         raw_wps = llm_out.get("planned_waypoints", [])
