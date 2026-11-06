@@ -4,7 +4,7 @@ from typing import Dict, Any
 
 from src.engine.backend.game_state import GameState
 from src.engine.backend.session_logger import TestSessionLogger
-from src.engine.backend.physics import TrajectoryResult
+from src.engine.backend.physics import HitType, TrajectoryResult
 
 
 class ScenarioLoader:
@@ -44,4 +44,23 @@ class BenchmarkRunner:
         formula = llm_response.get("formula", "")
         sim_result = self.game_state.fire_formula(formula)
         self.logger.record_attempt(llm_output=llm_response, sim_result=sim_result)
+        return sim_result
+
+    def record_no_answer(self, reason: str) -> TrajectoryResult:
+        """Record an attempt where the model gave no formula, so it counts as a miss and shows in history."""
+        sim_result = TrajectoryResult(
+            formula_str="",
+            is_success=False,
+            hit_type=HitType.NO_ANSWER,
+            hit_coordinate=None,
+            hit_obstacle_name=None,
+            hit_target_id=None,
+            trajectory_points=[],
+            closest_distance_to_target=float("inf"),
+            error_message=reason,
+        )
+        self.logger.record_attempt(
+            llm_output={"reasoning": None, "strategy": None, "planned_waypoints": [], "formula": None},
+            sim_result=sim_result,
+        )
         return sim_result

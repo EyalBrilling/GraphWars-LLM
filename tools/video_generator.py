@@ -202,8 +202,8 @@ def generate_trajectory_video(
         llm_out = attempt_entry.get("llm_output", {})
         sim_res = attempt_entry.get("simulation_result", {})
 
-        formula_str = llm_out.get("formula", "0")
-        strategy = llm_out.get("strategy", "N/A")
+        formula_str = llm_out.get("formula") or ""
+        strategy = llm_out.get("strategy") or ("no answer" if sim_res.get("hit_type") == "no_answer" else "N/A")
         waypoints = llm_out.get("planned_waypoints", []) or []
         wx = [w["x"] for w in waypoints if "x" in w and "y" in w]
         wy = [w["y"] for w in waypoints if "x" in w and "y" in w]

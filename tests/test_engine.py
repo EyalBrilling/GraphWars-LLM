@@ -2,6 +2,7 @@
 import sys
 import os
 import shutil
+import json
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.engine.backend.space import Point2D, CoordinateBounds, Shooter, Target
@@ -198,6 +199,39 @@ def test_unknown_obstacle_type_raises():
         assert False, "expected ValueError"
     except ValueError as e:
         assert "blob" in str(e)
+
+
+def test_no_answer_counts_as_miss_and_history_stays_clean():
+    from src.llm_agent.run_single_test_agent import SingleTestAgentRunner, LLMNoAnswerError
+    scen = os.path.join(os.path.dirname(__file__), "..", "experiments", "scenarios", "scenario_1_direct_shot.json")
+    out_dir = os.path.join("outputs", "_test_tmp_agent")
+    agent = SingleTestAgentRunner(scen, max_attempts=3, provider="mock", output_dir=out_dir)
+    seen_payloads = []
+
+    def fake_query(payload):
+        seen_payloads.append(payload)
+        if len(seen_payloads) == 1:
+            raise LLMNoAnswerError("Ran out of output tokens (16000) while thinking", {"req": 1}, {"resp": 1}, "thought")
+        return {
+            "reasoning": "flat line", "strategy": "direct",
+            "planned_waypoints": [], "formula": "0*x",
+            "_raw_request": {"huge": "x" * 1000}, "_raw_response": {"huge": "y"}, "_thinking": "secret",
+        }
+
+    agent.llm_client.query = fake_query
+    try:
+        ok, folder = agent.run()
+        assert ok, "second attempt should hit"
+        hist = agent.runner.logger.history
+        assert hist[0].simulation_result["hit_type"] == "no_answer"
+        assert hist[1].simulation_result["is_success"] is True
+        # Private keys never reach the history or the next payload
+        assert not any(k.startswith("_") for k in hist[1].llm_output)
+        assert seen_payloads[1]["history"][0]["simulation_result"]["hit_type"] == "no_answer"
+        assert "_raw_request" not in json.dumps(seen_payloads[1])
+        assert os.path.exists(os.path.join(folder, "attempt_1_thinking.txt"))
+    finally:
+        shutil.rmtree(out_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

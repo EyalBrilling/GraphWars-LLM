@@ -55,6 +55,10 @@ class TestSessionLogger:
     ) -> TestAttemptRecord:
         """Record an LLM attempt along with its physics simulation feedback."""
         attempt_num = len(self.history) + 1
+        # Keep only the model's contract fields. Private keys (_raw_request, _raw_response,
+        # _thinking) are saved to their own files; storing them here would feed them back
+        # to the model in the next attempt's history and make the payload snowball.
+        llm_output = {k: v for k, v in llm_output.items() if not k.startswith("_")}
         
         sim_dict = {
             "is_success": sim_result.is_success,

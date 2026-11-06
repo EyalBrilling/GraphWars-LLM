@@ -18,6 +18,7 @@ class HitType(Enum):
     MATH_ERROR = "math_error"
     INVALID_FORMULA = "invalid_formula"  # disallowed syntax, unparseable, or over the length cap
     INVALID_START = "invalid_start"      # f(x_shooter) is not within the shooter's radius
+    NO_ANSWER = "no_answer"              # the model returned no formula (e.g. ran out of output tokens)
 
 
 class FormulaValidationError(ValueError):

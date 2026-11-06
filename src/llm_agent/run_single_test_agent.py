@@ -19,6 +19,7 @@ Your goal is to formulate an explicit mathematical function y = f(x) that starts
 ATTEMPT BUDGET & STRATEGY:
 - You have a STRICT LIMITED BUDGET of maximum allowed attempts (see attempt_info in payload).
 - Think of a strategy that maximizes hit success in the number of attempts you have.
+- Each attempt has a fixed output budget shared by your thinking and your answer. If you run out before giving the JSON answer, the attempt counts as a miss (hit_type "no_answer"). A reasonable formula you can refine next attempt beats a perfect one you never write.
 
 INPUT & ATTEMPT HISTORY ANALYSIS:
 - You receive the arena geometry (shooter, target, bounds, obstacles), attempt_info budget, and an array of past attempts under 'history'.
@@ -51,13 +52,73 @@ You MUST respond with ONLY a valid JSON object matching this exact schema:
 """
 
 
+DEFAULT_MAX_TOKENS = 16000
+
+# USD per 1M tokens (input, output), Anthropic first-party list prices as of 2026-10.
+# Thinking tokens are billed as output. Unknown models get token counts but no $ figure.
+PRICING_PER_MTOK: Dict[str, Tuple[float, float]] = {
+    "claude-haiku-5-5": (0.10, 0.50),   # prompts up to 100K tokens
+    "claude-sonnet-5-5": (2.00, 10.00),
+    "claude-sonnet-5": (2.00, 10.00),
+    "claude-opus-5-5": (4.00, 20.00),
+    "claude-opus-5": (5.00, 25.00),
+    "claude-fable-5-1": (10.00, 50.00),
+    "claude-haiku-4-5": (1.00, 5.00),
+}
+
+
+def extract_usage(provider: str, raw_response: Any) -> Dict[str, int]:
+    """Normalize token usage from a raw provider response to {input, output, thinking}."""
+    if not isinstance(raw_response, dict):
+        return {}
+    if provider == "anthropic":
+        u = raw_response.get("usage") or {}
+        return {
+            "input": int(u.get("input_tokens", 0)) + int(u.get("cache_creation_input_tokens", 0) or 0)
+                     + int(u.get("cache_read_input_tokens", 0) or 0),
+            "output": int(u.get("output_tokens", 0)),
+            "thinking": int((u.get("output_tokens_details") or {}).get("thinking_tokens", 0)),
+        }
+    if provider == "openai":
+        u = raw_response.get("usage") or {}
+        return {"input": int(u.get("prompt_tokens", 0)), "output": int(u.get("completion_tokens", 0)), "thinking": 0}
+    if provider == "gemini":
+        u = raw_response.get("usageMetadata") or {}
+        return {
+            "input": int(u.get("promptTokenCount", 0)),
+            "output": int(u.get("candidatesTokenCount", 0)) + int(u.get("thoughtsTokenCount", 0)),
+            "thinking": int(u.get("thoughtsTokenCount", 0)),
+        }
+    return {}
+
+
+def estimate_cost(model: str, usage: Dict[str, int]) -> Optional[float]:
+    """USD cost for one call, or None if the model's price isn't known."""
+    price = PRICING_PER_MTOK.get(model)
+    if not price or not usage:
+        return None
+    return (usage.get("input", 0) * price[0] + usage.get("output", 0) * price[1]) / 1_000_000
+
+
+class LLMNoAnswerError(RuntimeError):
+    """The model returned no usable answer (e.g. it spent the whole output budget thinking)."""
+
+    def __init__(self, message: str, raw_request: Any = None, raw_response: Any = None, thinking: Optional[str] = None):
+        super().__init__(message)
+        self.raw_request = raw_request
+        self.raw_response = raw_response
+        self.thinking = thinking
+
+
 class LLMClient:
     """Handles communications with LLM providers (Gemini, OpenAI, Anthropic, or Mock)."""
 
-    def __init__(self, provider: str = "gemini", model: Optional[str] = None, api_key: Optional[str] = None):
+    def __init__(self, provider: str = "gemini", model: Optional[str] = None, api_key: Optional[str] = None,
+                 max_tokens: int = DEFAULT_MAX_TOKENS):
         self.provider = provider.lower()
         self.model = model or self._default_model()
         self.api_key = api_key or self._resolve_api_key()
+        self.max_tokens = max_tokens  # caps thinking + answer together, i.e. the worst-case cost per attempt
 
     def _default_model(self) -> str:
         if self.provider == "gemini":
@@ -65,7 +126,7 @@ class LLMClient:
         elif self.provider == "openai":
             return "gpt-4o"
         elif self.provider == "anthropic":
-            return "claude-sonnet-5-5"
+            return "claude-haiku-5-5"  # cheapest current Claude; use -m claude-sonnet-5-5 for showcase runs
         return "mock"
 
     def _resolve_api_key(self) -> Optional[str]:
@@ -115,6 +176,7 @@ class LLMClient:
                 }
             ],
             "generationConfig": {
+                "maxOutputTokens": self.max_tokens,
                 "temperature": 0.2,
                 "responseMimeType": "application/json"
             }
@@ -146,6 +208,7 @@ class LLMClient:
                 {"role": "user", "content": user_message}
             ],
             "response_format": {"type": "json_object"},
+            "max_tokens": self.max_tokens,
             "temperature": 0.2
         }
 
@@ -176,7 +239,7 @@ class LLMClient:
         url = "https://api.anthropic.com/v1/messages"
         req_body = {
             "model": self.model,
-            "max_tokens": 32768,
+            "max_tokens": self.max_tokens,
             # Thinking runs by default on current models, but its text is omitted unless
             # requested. "summarized" returns a readable summary (the raw chain is never exposed).
             "thinking": {"type": "adaptive", "display": "summarized"},
@@ -211,16 +274,32 @@ class LLMClient:
                     block["text"] for block in result.get("content", [])
                     if block.get("type") == "text" and "text" in block
                 ]
-                if not text_blocks:
-                    raise ValueError(f"No text block found in Anthropic response payload: {result}")
                 text = "".join(text_blocks)
-                
-                parsed = self._parse_json_response(text)
+                stop_reason = result.get("stop_reason")
+
+                if not text.strip():
+                    reason = (
+                        f"Ran out of output tokens ({self.max_tokens}) while thinking, before giving a formula"
+                        if stop_reason == "max_tokens"
+                        else f"Response contained no answer text (stop_reason={stop_reason})"
+                    )
+                    raise LLMNoAnswerError(reason, req_body, result, thinking_text)
+                try:
+                    parsed = self._parse_json_response(text)
+                except ValueError:
+                    if stop_reason == "max_tokens":
+                        raise LLMNoAnswerError(
+                            f"Ran out of output tokens ({self.max_tokens}) mid-answer; the JSON was cut off",
+                            req_body, result, thinking_text,
+                        )
+                    raise
                 if thinking_text:
                     parsed["_thinking"] = thinking_text
                 parsed["_raw_request"] = req_body
                 parsed["_raw_response"] = result
                 return parsed
+        except LLMNoAnswerError:
+            raise
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8")
             raise RuntimeError(f"Anthropic API call failed (HTTP {e.code}): {err_body}")
@@ -297,12 +376,88 @@ class SingleTestAgentRunner:
         provider: str = "gemini",
         model: Optional[str] = None,
         api_key: Optional[str] = None,
-        output_dir: str = "outputs"
+        output_dir: str = "outputs",
+        max_tokens: int = DEFAULT_MAX_TOKENS,
     ):
         self.scenario_path = scenario_path
         self.max_attempts = max_attempts
         self.runner = BenchmarkRunner(scenario_path, output_dir=output_dir)
-        self.llm_client = LLMClient(provider=provider, model=model, api_key=api_key)
+        self.llm_client = LLMClient(provider=provider, model=model, api_key=api_key, max_tokens=max_tokens)
+        self.cost_log: list = []
+
+    def _record_cost(self, attempt: int, raw_resp: Any) -> None:
+        """Print this attempt's tokens and $ cost, and keep it for the run summary."""
+        usage = extract_usage(self.llm_client.provider, raw_resp)
+        if not usage:
+            return
+        cost = estimate_cost(self.llm_client.model, usage)
+        self.cost_log.append({"attempt": attempt, **usage, "cost_usd": cost})
+        cost_str = f"${cost:.4f}" if cost is not None else "price unknown"
+        print(f"  Tokens:    in {usage['input']:,} | out {usage['output']:,} "
+              f"(thinking {usage['thinking']:,}) | cost {cost_str}")
+
+    def _finish(self, passed: bool, attempts_used: int) -> Tuple[bool, str]:
+        """Print the run's total cost and write cost_summary.json into the run folder."""
+        folder = self.runner.logger.test_folder
+        known = [c["cost_usd"] for c in self.cost_log if c["cost_usd"] is not None]
+        total = sum(known) if known else None
+        summary = {
+            "provider": self.llm_client.provider,
+            "model": self.llm_client.model,
+            "max_tokens": self.llm_client.max_tokens,
+            "passed": passed,
+            "attempts_used": attempts_used,
+            "total_input_tokens": sum(c["input"] for c in self.cost_log),
+            "total_output_tokens": sum(c["output"] for c in self.cost_log),
+            "total_thinking_tokens": sum(c["thinking"] for c in self.cost_log),
+            "total_cost_usd": round(total, 6) if total is not None else None,
+            "pricing_per_mtok": PRICING_PER_MTOK.get(self.llm_client.model),
+            "attempts": self.cost_log,
+        }
+        with open(os.path.join(folder, "cost_summary.json"), "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2)
+
+        print("\n" + "=" * 75)
+        if passed:
+            print(f"TEST PASSED in {attempts_used} attempt(s)!")
+        else:
+            print(f"TEST FAILED: Target was not hit within {self.max_attempts} attempts.")
+        if self.cost_log:
+            total_str = f"${total:.4f}" if total is not None else "price unknown"
+            print(f"Run cost:      {total_str}  ({summary['total_output_tokens']:,} output tokens, "
+                  f"{summary['total_thinking_tokens']:,} of them thinking)")
+        print(f"Output folder: {folder}")
+        print("\nTo view the trajectory playback in the 2D visualizer, run:")
+        print("  python main.py")
+        print("=" * 75)
+        return passed, folder
+
+    def _dump_attempt_files(self, attempt: int, raw_req: Any, raw_resp: Any, thinking: Optional[str],
+                            llm_output: Dict[str, Any], no_answer: Optional[str] = None) -> None:
+        """Write this attempt's raw API request/response and thinking summary into the run folder."""
+        folder = self.runner.logger.test_folder
+        if raw_req:
+            with open(os.path.join(folder, f"attempt_{attempt}_raw_request.json"), "w", encoding="utf-8") as f:
+                json.dump(raw_req, f, indent=2)
+        if raw_resp:
+            with open(os.path.join(folder, f"attempt_{attempt}_raw_response.json"), "w", encoding="utf-8") as f:
+                json.dump(raw_resp, f, indent=2)
+
+        with open(os.path.join(folder, f"attempt_{attempt}_thinking.txt"), "w", encoding="utf-8") as f:
+            f.write(f"=== ATTEMPT {attempt} LLM THINKING DUMP ===\n")
+            f.write(f"Timestamp: {datetime.now().isoformat()}\n\n")
+            if thinking:
+                f.write("--- NATIVE LLM THINKING BLOCK ---\n")
+                f.write(thinking)
+                f.write("\n\n")
+            if no_answer:
+                f.write(f"--- NO ANSWER ---\n{no_answer}\n")
+                return
+            f.write("--- STRUCTURED REASONING & PLAN ---\n")
+            f.write(f"Reasoning: {llm_output.get('reasoning')}\n")
+            f.write(f"Strategy:  {llm_output.get('strategy')}\n")
+            f.write(f"Formula:   y = {llm_output.get('formula')}\n")
+            f.write(f"Waypoints: {json.dumps(llm_output.get('planned_waypoints'))}\n")
 
     def run(self) -> Tuple[bool, str]:
         print("=" * 75)
@@ -310,6 +465,7 @@ class SingleTestAgentRunner:
         print(f"Scenario:     {self.runner.scenario_name}")
         print(f"Provider:     {self.llm_client.provider} (Model: {self.llm_client.model})")
         print(f"Max Attempts: {self.max_attempts}")
+        print(f"Max Tokens:   {self.llm_client.max_tokens} per attempt (thinking + answer)")
         print("=" * 75)
 
         for attempt in range(1, self.max_attempts + 1):
@@ -326,42 +482,22 @@ class SingleTestAgentRunner:
             # 2. Call LLM
             try:
                 llm_response = self.llm_client.query(payload)
+            except LLMNoAnswerError as e:
+                # Counts as a missed attempt: logged, shown to the model next time, run continues
+                self._dump_attempt_files(attempt, e.raw_request, e.raw_response, e.thinking, {}, no_answer=str(e))
+                self.runner.record_no_answer(str(e))
+                print(f"  [FAILED] No answer: {e}")
+                self._record_cost(attempt, e.raw_response)
+                continue
             except Exception as e:
                 print(f"  [ERROR] Error during LLM query: {e}")
-                break
+                return self._finish(False, attempt - 1)
 
-            # Dump LLM thinking and raw API request/response files for this attempt into the output folder
-            thinking_file = os.path.join(self.runner.logger.test_folder, f"attempt_{attempt}_thinking.txt")
-            raw_req_file = os.path.join(self.runner.logger.test_folder, f"attempt_{attempt}_raw_request.json")
-            raw_resp_file = os.path.join(self.runner.logger.test_folder, f"attempt_{attempt}_raw_response.json")
-
-            raw_req = llm_response.get("_raw_request")
-            raw_resp = llm_response.get("_raw_response")
-            if raw_req:
-                with open(raw_req_file, "w", encoding="utf-8") as f:
-                    json.dump(raw_req, f, indent=2)
-            if raw_resp:
-                with open(raw_resp_file, "w", encoding="utf-8") as f:
-                    json.dump(raw_resp, f, indent=2)
-
-            native_thinking = llm_response.get("_thinking")
-            reasoning = llm_response.get("reasoning")
-            strategy = llm_response.get("strategy")
-            formula = llm_response.get("formula")
-            waypoints = llm_response.get("planned_waypoints")
-
-            with open(thinking_file, "w", encoding="utf-8") as f:
-                f.write(f"=== ATTEMPT {attempt} LLM THINKING DUMP ===\n")
-                f.write(f"Timestamp: {datetime.now().isoformat()}\n\n")
-                if native_thinking:
-                    f.write("--- NATIVE LLM THINKING BLOCK ---\n")
-                    f.write(native_thinking)
-                    f.write("\n\n")
-                f.write("--- STRUCTURED REASONING & PLAN ---\n")
-                f.write(f"Reasoning: {reasoning}\n")
-                f.write(f"Strategy:  {strategy}\n")
-                f.write(f"Formula:   y = {formula}\n")
-                f.write(f"Waypoints: {json.dumps(waypoints)}\n")
+            self._dump_attempt_files(
+                attempt, llm_response.get("_raw_request"), llm_response.get("_raw_response"),
+                llm_response.get("_thinking"), llm_response,
+            )
+            self._record_cost(attempt, llm_response.get("_raw_response"))
 
             print(f"  Reasoning: {llm_response.get('reasoning', 'N/A')}")
             print(f"  Strategy:  {llm_response.get('strategy', 'N/A')}")
@@ -374,13 +510,7 @@ class SingleTestAgentRunner:
             if sim_result.is_success:
                 print(f"  [SUCCESS] Target Destroyed ({sim_result.hit_target_id})!")
                 print(f"     Closest distance: {sim_result.closest_distance_to_target:.3f}")
-                print("\n" + "=" * 75)
-                print(f"TEST PASSED in {attempt} attempt(s)!")
-                print(f"Output folder: {self.runner.logger.test_folder}")
-                print("\nTo view the trajectory playback in the 2D visualizer, run:")
-                print("  python main.py")
-                print("=" * 75)
-                return True, self.runner.logger.test_folder
+                return self._finish(True, attempt)
 
             else:
                 print(f"  [FAILED] Shot Outcome: {sim_result.hit_type.value.upper()}")
@@ -390,13 +520,7 @@ class SingleTestAgentRunner:
                     print(f"     Impact Point:  ({sim_result.hit_coordinate.x:.2f}, {sim_result.hit_coordinate.y:.2f})")
                 print(f"     Closest dist to target: {sim_result.closest_distance_to_target:.3f}")
 
-        print("\n" + "=" * 75)
-        print(f"TEST FAILED: Target was not hit within {self.max_attempts} attempts.")
-        print(f"Output folder: {self.runner.logger.test_folder}")
-        print("\nTo view the trajectory attempts in the 2D visualizer, run:")
-        print("  python main.py")
-        print("=" * 75)
-        return False, self.runner.logger.test_folder
+        return self._finish(False, self.max_attempts)
 
 
 def resolve_scenario_path(scenario_arg: str) -> str:
@@ -432,13 +556,20 @@ def main():
     parser.add_argument(
         "--provider", "-p",
         choices=["gemini", "openai", "anthropic", "mock"],
-        default="gemini",
-        help="LLM Provider (default: gemini)"
+        default="anthropic",
+        help="LLM Provider (default: anthropic, model claude-haiku-5-5)"
     )
     parser.add_argument(
         "--model", "-m",
         default=None,
-        help="Specific model name (e.g. gemini-2.5-flash, gpt-4o, claude-3-5-sonnet-20241022)"
+        help="Specific model name (e.g. claude-haiku-5-5, claude-sonnet-5-5, gemini-2.5-flash, gpt-4o)"
+    )
+    parser.add_argument(
+        "--max-tokens", "-t",
+        type=int,
+        default=DEFAULT_MAX_TOKENS,
+        help=f"Output token cap per attempt, thinking included (default: {DEFAULT_MAX_TOKENS}). "
+             "Hitting it counts as a missed attempt.",
     )
     parser.add_argument(
         "--api-key", "-k",
@@ -459,7 +590,8 @@ def main():
         max_attempts=args.max_attempts,
         provider=args.provider,
         model=args.model,
-        api_key=args.api_key
+        api_key=args.api_key,
+        max_tokens=args.max_tokens,
     )
     success, _ = runner.run()
     sys.exit(0 if success else 1)
