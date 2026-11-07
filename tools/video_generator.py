@@ -250,8 +250,9 @@ def generate_trajectory_video(
         if is_success:
             outcome_text, outcome_color, marker, msize = "TARGET HIT", SUCCESS, "*", 22
         else:
-            label = hit_obstacle or sim_res.get("hit_type", "miss").replace("_", " ")
-            outcome_text, outcome_color, marker, msize = f"MISS · {label}", FAIL, "X", 14
+            # Name the obstacle when there is one; other misses (e.g. invalid start) read as plain "MISS".
+            outcome_text = f"MISS · {hit_obstacle}" if hit_obstacle else "MISS"
+            outcome_color, marker, msize = FAIL, "X", 14
 
         draw_arena(ax, bounds, shooter, targets, obstacles, shooter_label)
         if wx:
