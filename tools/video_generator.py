@@ -108,11 +108,28 @@ def draw_arena(
                 color=SUCCESS, fontsize=9, fontweight="bold", ha="center", va="top", zorder=12)
 
 
-def draw_header(fig: plt.Figure, attempt_num: int, total: int, strategy: str, formula: str,
+def pretty_model_name(model_id: str) -> str:
+    """'claude-sonnet-5-5' -> 'CLAUDE SONNET 5.5' (falls back to the raw id)."""
+    parts = (model_id or "").split("-")
+    if len(parts) >= 3 and parts[-1].isdigit() and parts[-2].isdigit():
+        return " ".join(parts[:-2]).upper() + f" {parts[-2]}.{parts[-1]}"
+    return (model_id or "").upper()
+
+
+def draw_header(fig: plt.Figure, attempt_num: int, total: int, model_title: str, strategy: str, formula: str,
                 outcome_text: Optional[str] = None, outcome_color: str = TEXT) -> List[Any]:
-    """Header above the plot: attempt, strategy, wrapped formula and (at impact) the outcome."""
+    """Header above the plot: attempt, wrapped formula and (at impact) the outcome.
+
+    The model's self-reported strategy label is not shown (it can contradict the formula,
+    e.g. "trigonometric_wave" on a sum of bumps); only "no answer" is surfaced.
+    """
+    title = f"ATTEMPT {attempt_num} / {total}"
+    if model_title:
+        title = f"{model_title}   ·   {title}"
+    if strategy == "no answer":
+        title += "   ·   NO ANSWER"
     artists = [
-        fig.text(0.04, 0.955, f"ATTEMPT {attempt_num} / {total}   ·   {strategy.upper()}",
+        fig.text(0.04, 0.955, title,
                  color=TEXT, fontsize=12, fontweight="bold", va="top"),
     ]
     wrapped = textwrap.fill(f"y = {formula}", FORMULA_WRAP, subsequent_indent="    ")
@@ -182,6 +199,7 @@ def generate_trajectory_video(
     state = GameState.from_dict(initial_state)
     bounds, shooter, targets, obstacles = state.bounds, state.shooter, state.targets, state.obstacles
     shooter_label = model_label_for_run(output_dir)
+    model_title = pretty_model_name(shooter_label)
 
     fig, ax = plt.subplots(figsize=(12, 7.5), dpi=100)
     fig.patch.set_facecolor(BG)
@@ -221,7 +239,7 @@ def generate_trajectory_video(
             ax.plot(x_vals[: idx_end + 1], y_vals[: idx_end + 1], color=ACCENT, linewidth=2.5, alpha=0.95, zorder=4)
             ax.plot(x_vals[idx_end], y_vals[idx_end], "o", color="#F43F5E", markersize=10, zorder=6)
             ax.plot(x_vals[idx_end], y_vals[idx_end], "o", color="#FFFFFF", markersize=5, zorder=7)
-            header = draw_header(fig, attempt_num, total_attempts, strategy, formula_str)
+            header = draw_header(fig, attempt_num, total_attempts, model_title, strategy, formula_str)
             frames.append(capture(fig))
             for a in header:
                 a.remove()
@@ -242,7 +260,7 @@ def generate_trajectory_video(
         if not is_success:  # on a hit the path ending in the cake says it; a star would cover the icon
             ax.plot(x_vals[-1], y_vals[-1], marker, color=outcome_color, markersize=msize,
                     markeredgecolor="white", markeredgewidth=1.2, zorder=8)
-        header = draw_header(fig, attempt_num, total_attempts, strategy, formula_str, outcome_text, outcome_color)
+        header = draw_header(fig, attempt_num, total_attempts, model_title, strategy, formula_str, outcome_text, outcome_color)
         hold = capture(fig)
         for a in header:
             a.remove()
