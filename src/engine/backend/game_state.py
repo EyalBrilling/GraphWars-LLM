@@ -77,8 +77,13 @@ class GameState:
     def add_obstacle(self, obstacle: BaseObstacle) -> None:
         self.obstacles.append(obstacle)
 
-    def evaluate_formula(self, formula_str: str, step_size: float = 0.05) -> TrajectoryResult:
-        """Simulate a shot under this arena's rules without changing any state."""
+    def evaluate_formula(self, formula_str: str, step_size: float = 0.05,
+                         enforce_start: bool = True) -> TrajectoryResult:
+        """Simulate a shot under this arena's rules without changing any state.
+
+        enforce_start=False traces the curve even if it doesn't start at the shooter
+        (used only for visualising invalid-start attempts, never for scoring).
+        """
         # Determine firing direction based on target position relative to shooter
         main_target = [t for t in self.targets if t.is_alive][0] if any(t.is_alive for t in self.targets) else self.targets[0]
         direction = 1 if main_target.position.x >= self.shooter.position.x else -1
@@ -92,6 +97,7 @@ class GameState:
             step_size=step_size,
             direction=direction,
             max_formula_characters=self.max_formula_characters,
+            enforce_start=enforce_start,
         )
 
     def fire_formula(self, formula_str: str, step_size: float = 0.05) -> TrajectoryResult:

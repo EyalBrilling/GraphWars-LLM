@@ -33,6 +33,7 @@ if PROJECT_ROOT not in sys.path:
 from src.engine.backend.space import CoordinateBounds, Shooter, Target
 from src.engine.backend.obstacles import BoxObstacle, CircleObstacle, PolygonObstacle, TerrainObstacle
 from src.engine.backend.game_state import GameState
+from src.engine.backend.physics import TrajectoryEvaluator
 from src.engine.ui.icons import draw_goal_icon, draw_hit_area, draw_start_icon, icon_size, model_label_for_run
 
 
@@ -44,6 +45,13 @@ SUCCESS = "#22C55E"
 FAIL = "#EF4444"
 FORMULA_WRAP = 110  # characters per line for the formula in the header
 
+# Social layout: two stacked halves make a 1080x1350 (4:5) post. Each half is 10in wide with a
+# 0.62in header strip on top of the plot; the plot shows y in SOCIAL_Y_RANGE (walls run past it,
+# nothing happens there) so the arena fills the width.
+SOCIAL_FIG_W, SOCIAL_FIG_H, SOCIAL_HEADER_IN = 10.0, 6.222, 0.622
+SOCIAL_HEADER_Y = 1 - (SOCIAL_HEADER_IN / 2) / SOCIAL_FIG_H
+SOCIAL_Y_RANGE = (-26.0, 30.0)
+
 
 def draw_arena(
     ax: plt.Axes,
@@ -52,34 +60,46 @@ def draw_arena(
     targets: List[Target],
     obstacles: List[Any],
     shooter_label: Optional[str] = None,
+    social: bool = False,
 ):
-    """Draw the static arena environment (background, grid, obstacles, shooter, targets)."""
+    """Draw the static arena environment (background, grid, obstacles, shooter, targets).
+
+    social=True is the phone-readable style: no grid/ticks/labels, thicker edges, bigger icons.
+    """
     ax.clear()
     ax.set_facecolor(BG)
 
     ax.set_xlim(bounds.x_min, bounds.x_max)
-    ax.set_ylim(bounds.y_min, bounds.y_max)
-    ax.set_aspect("equal")
-    ax.grid(True, linestyle="--", alpha=0.15, color=MUTED)
-    ax.tick_params(colors=MUTED, labelsize=8)
+    if social:
+        ax.set_ylim(max(bounds.y_min, SOCIAL_Y_RANGE[0]), min(bounds.y_max, SOCIAL_Y_RANGE[1]))
+    else:
+        ax.set_ylim(bounds.y_min, bounds.y_max)
+    ax.set_aspect("auto" if social else "equal")
+    if social:
+        ax.set_xticks([])
+        ax.set_yticks([])
+    else:
+        ax.grid(True, linestyle="--", alpha=0.15, color=MUTED)
+        ax.tick_params(colors=MUTED, labelsize=8)
     for spine in ax.spines.values():
         spine.set_color("#334155")
 
+    edge_w = 2.5 if social else 1.5
     for obs in obstacles:
         if isinstance(obs, BoxObstacle):
             ax.add_patch(patches.Rectangle(
                 (obs.x_min, obs.y_min), obs.x_max - obs.x_min, obs.y_max - obs.y_min,
-                linewidth=1.5, edgecolor="#64748B", facecolor="#334155", alpha=0.85, zorder=2,
+                linewidth=edge_w, edgecolor="#64748B", facecolor="#334155", alpha=0.85, zorder=2,
             ))
         elif isinstance(obs, CircleObstacle):
             ax.add_patch(patches.Circle(
                 (obs.center.x, obs.center.y), obs.radius,
-                linewidth=1.5, edgecolor="#64748B", facecolor="#334155", alpha=0.85, zorder=2,
+                linewidth=edge_w, edgecolor="#64748B", facecolor="#334155", alpha=0.85, zorder=2,
             ))
         elif isinstance(obs, PolygonObstacle):
             ax.add_patch(patches.Polygon(
                 [[v.x, v.y] for v in obs.vertices], closed=True,
-                linewidth=1.5, edgecolor="#64748B", facecolor="#334155", alpha=0.85, zorder=2,
+                linewidth=edge_w, edgecolor="#64748B", facecolor="#334155", alpha=0.85, zorder=2,
             ))
         elif isinstance(obs, TerrainObstacle):
             xs = [p.x for p in obs.points]
@@ -91,21 +111,24 @@ def draw_arena(
             ))
 
     # Start: robot emoji labeled with the model; dashed circle = real start radius
+    icon_scale = 1.6 if social else 1.0
     sx, sy = shooter.position.x, shooter.position.y
-    s_size = icon_size(bounds, shooter.radius)
+    s_size = icon_size(bounds, shooter.radius) * icon_scale
     draw_hit_area(ax, sx, sy, shooter.radius, ACCENT)
     draw_start_icon(ax, sx, sy, s_size, zorder=6)
-    ax.text(sx, sy - 0.6 * s_size, shooter_label or shooter.name,
-            color=ACCENT, fontsize=9, fontweight="bold", ha="center", va="top", zorder=12)
+    if not social:  # in social mode the model name is in the header instead
+        ax.text(sx, sy - 0.6 * s_size, shooter_label or shooter.name,
+                color=ACCENT, fontsize=9, fontweight="bold", ha="center", va="top", zorder=12)
 
     # Goal: the cake; dashed circle = real hit radius
     for t in targets:
         tx, ty = t.position.x, t.position.y
-        t_size = icon_size(bounds, t.radius)
+        t_size = icon_size(bounds, t.radius) * icon_scale
         draw_hit_area(ax, tx, ty, t.radius, SUCCESS)
         draw_goal_icon(ax, tx, ty, t_size, zorder=6)
-        ax.text(tx, ty - 0.6 * t_size, "Cake",
-                color=SUCCESS, fontsize=9, fontweight="bold", ha="center", va="top", zorder=12)
+        if not social:
+            ax.text(tx, ty - 0.6 * t_size, "Cake",
+                    color=SUCCESS, fontsize=9, fontweight="bold", ha="center", va="top", zorder=12)
 
 
 def pretty_model_name(model_id: str) -> str:
@@ -117,7 +140,8 @@ def pretty_model_name(model_id: str) -> str:
 
 
 def draw_header(fig: plt.Figure, attempt_num: int, total: int, model_title: str, strategy: str, formula: str,
-                outcome_text: Optional[str] = None, outcome_color: str = TEXT) -> List[Any]:
+                outcome_text: Optional[str] = None, outcome_color: str = TEXT,
+                social: bool = False) -> List[Any]:
     """Header above the plot: attempt, wrapped formula and (at impact) the outcome.
 
     The model's self-reported strategy label is not shown (it can contradict the formula,
@@ -128,6 +152,20 @@ def draw_header(fig: plt.Figure, attempt_num: int, total: int, model_title: str,
         title = f"{model_title}   ·   {title}"
     if strategy == "no answer":
         title += "   ·   NO ANSWER"
+    if social:
+        # Phone-readable: one header line (model + attempt) and a big outcome badge, no formula
+        y = SOCIAL_HEADER_Y
+        artists = [
+            fig.text(0.02, y, f"{model_title}  ·  {attempt_num}/{total}", color=TEXT, fontsize=24,
+                     fontweight="bold", va="center"),
+        ]
+        if outcome_text:
+            artists.append(fig.text(
+                0.98, y, outcome_text, color=outcome_color, fontsize=24, fontweight="bold",
+                ha="right", va="center",
+                bbox=dict(boxstyle="round,pad=0.25", facecolor="#1E293B", edgecolor=outcome_color, linewidth=3),
+            ))
+        return artists
     artists = [
         fig.text(0.04, 0.955, title,
                  color=TEXT, fontsize=12, fontweight="bold", va="top"),
@@ -172,6 +210,8 @@ def generate_trajectory_video(
     fps: int = 30,
     output_file: Optional[str] = None,
     pause_sec: float = 1.5,
+    social: bool = False,
+    anchor_invalid_start: bool = False,
 ):
     """
     Generate an animated GIF/MP4 video from a GraphWars output folder.
@@ -182,6 +222,9 @@ def generate_trajectory_video(
         fps: Frames per second of the output video
         output_file: Target file path (.gif or .mp4)
         pause_sec: Seconds to hold on the impact frame before the next attempt
+        social: Phone-readable style for social media (big header, no formula, thick lines)
+        anchor_invalid_start: For invalid-start attempts, draw the curve shifted to start at the
+            shooter (presentation only; the attempt is still shown as a miss)
     """
     history_path = os.path.join(output_dir, "history.json")
     if not os.path.exists(history_path):
@@ -201,9 +244,15 @@ def generate_trajectory_video(
     shooter_label = model_label_for_run(output_dir)
     model_title = pretty_model_name(shooter_label)
 
-    fig, ax = plt.subplots(figsize=(12, 7.5), dpi=100)
+    if social:
+        fig = plt.figure(figsize=(SOCIAL_FIG_W, SOCIAL_FIG_H), dpi=100)
+        ax = fig.add_axes([0.0, 0.0, 1.0, 1 - SOCIAL_HEADER_IN / SOCIAL_FIG_H])
+    else:
+        fig, ax = plt.subplots(figsize=(12, 7.5), dpi=100)
+        fig.subplots_adjust(left=0.05, right=0.97, bottom=0.06, top=0.80)
     fig.patch.set_facecolor(BG)
-    fig.subplots_adjust(left=0.05, right=0.97, bottom=0.06, top=0.80)
+    line_w = 6.0 if social else 2.5
+    head_big, head_small = (20, 10) if social else (10, 5)
 
     frames: List[Image.Image] = []
     dx_per_frame = speed / float(fps)
@@ -227,19 +276,35 @@ def generate_trajectory_video(
         wy = [w["y"] for w in waypoints if "x" in w and "y" in w]
 
         traj = state.evaluate_formula(formula_str, step_size=0.05)
+        if getattr(traj.hit_type, "value", traj.hit_type) == "invalid_start":
+            raw = state.evaluate_formula(formula_str, step_size=0.05, enforce_start=False)
+            if anchor_invalid_start and raw.trajectory_points:
+                # Presentation option: shift the model's curve so it starts at the shooter
+                # (same shape, constant offset removed). The outcome shown stays a miss.
+                offset = raw.trajectory_points[0].y - shooter.position.y
+                traj = TrajectoryEvaluator.evaluate(
+                    formula_str=f"({formula_str})-({offset!r})", shooter=shooter, targets=targets,
+                    obstacles=obstacles, bounds=bounds, step_size=0.05,
+                    direction=1 if targets[0].position.x >= shooter.position.x else -1,
+                    max_formula_characters=10**6,
+                )
+            else:
+                # Show the curve the model actually wrote (it starts away from the shooter).
+                traj = raw
         pts = traj.trajectory_points or [shooter.position]
         x_vals = [p.x for p in pts]
         y_vals = [p.y for p in pts]
 
         # Animate the projectile at constant x-speed
         for idx_end in frame_end_indices(x_vals, dx_per_frame):
-            draw_arena(ax, bounds, shooter, targets, obstacles, shooter_label)
-            if wx:
-                ax.plot(wx, wy, "o--", color="#F59E0B", alpha=0.45, linewidth=1, markersize=4, zorder=3)
-            ax.plot(x_vals[: idx_end + 1], y_vals[: idx_end + 1], color=ACCENT, linewidth=2.5, alpha=0.95, zorder=4)
-            ax.plot(x_vals[idx_end], y_vals[idx_end], "o", color="#F43F5E", markersize=10, zorder=6)
-            ax.plot(x_vals[idx_end], y_vals[idx_end], "o", color="#FFFFFF", markersize=5, zorder=7)
-            header = draw_header(fig, attempt_num, total_attempts, model_title, strategy, formula_str)
+            draw_arena(ax, bounds, shooter, targets, obstacles, shooter_label, social)
+            if wx:  # the model's own planned waypoints
+                ax.plot(wx, wy, "o--", color="#F59E0B", alpha=0.7 if social else 0.45,
+                        linewidth=2.5 if social else 1, markersize=8 if social else 4, zorder=3)
+            ax.plot(x_vals[: idx_end + 1], y_vals[: idx_end + 1], color=ACCENT, linewidth=line_w, alpha=0.95, zorder=4)
+            ax.plot(x_vals[idx_end], y_vals[idx_end], "o", color="#F43F5E", markersize=head_big, zorder=6)
+            ax.plot(x_vals[idx_end], y_vals[idx_end], "o", color="#FFFFFF", markersize=head_small, zorder=7)
+            header = draw_header(fig, attempt_num, total_attempts, model_title, strategy, formula_str, social=social)
             frames.append(capture(fig))
             for a in header:
                 a.remove()
@@ -251,17 +316,20 @@ def generate_trajectory_video(
             outcome_text, outcome_color, marker, msize = "TARGET HIT", SUCCESS, "*", 22
         else:
             # Name the obstacle when there is one; other misses (e.g. invalid start) read as plain "MISS".
-            outcome_text = f"MISS · {hit_obstacle}" if hit_obstacle else "MISS"
-            outcome_color, marker, msize = FAIL, "X", 14
+            outcome_text = f"MISS · {hit_obstacle}" if hit_obstacle and not social else "MISS"
+            outcome_color, marker, msize = FAIL, "X", (30 if social else 14)
 
-        draw_arena(ax, bounds, shooter, targets, obstacles, shooter_label)
+        draw_arena(ax, bounds, shooter, targets, obstacles, shooter_label, social)
         if wx:
-            ax.plot(wx, wy, "o--", color="#F59E0B", alpha=0.35, linewidth=1, markersize=4, zorder=3)
-        ax.plot(x_vals, y_vals, color=outcome_color if is_success else ACCENT, linewidth=2.8, alpha=0.95, zorder=4)
+            ax.plot(wx, wy, "o--", color="#F59E0B", alpha=0.6 if social else 0.35,
+                    linewidth=2.5 if social else 1, markersize=8 if social else 4, zorder=3)
+        ax.plot(x_vals, y_vals, color=outcome_color if is_success else ACCENT,
+                linewidth=line_w + 0.5, alpha=0.95, zorder=4)
         if not is_success:  # on a hit the path ending in the cake says it; a star would cover the icon
             ax.plot(x_vals[-1], y_vals[-1], marker, color=outcome_color, markersize=msize,
-                    markeredgecolor="white", markeredgewidth=1.2, zorder=8)
-        header = draw_header(fig, attempt_num, total_attempts, model_title, strategy, formula_str, outcome_text, outcome_color)
+                    markeredgecolor="white", markeredgewidth=2 if social else 1.2, zorder=8)
+        header = draw_header(fig, attempt_num, total_attempts, model_title, strategy, formula_str,
+                             outcome_text, outcome_color, social=social)
         hold = capture(fig)
         for a in header:
             a.remove()
@@ -303,6 +371,10 @@ def main():
     parser.add_argument("--fps", type=int, default=30, help="Video frame rate FPS (default: 30)")
     parser.add_argument("--output", "-o", default=None,
                         help="Output video file path (.gif or .mp4). Default: trajectory_video.gif inside output folder")
+    parser.add_argument("--social", action="store_true",
+                        help="Phone-readable style for social media: big header, no formula, thick lines")
+    parser.add_argument("--anchor-invalid-start", action="store_true",
+                        help="Draw invalid-start attempts shifted to start at the shooter (still shown as a miss)")
 
     args = parser.parse_args()
     target_dir = args.folder or args.output_dir
@@ -312,7 +384,9 @@ def main():
         sys.exit(1)
 
     try:
-        generate_trajectory_video(output_dir=target_dir, speed=args.speed, fps=args.fps, output_file=args.output)
+        generate_trajectory_video(output_dir=target_dir, speed=args.speed, fps=args.fps,
+                                  output_file=args.output, social=args.social,
+                                  anchor_invalid_start=args.anchor_invalid_start)
     except Exception as e:
         print(f"Error generating video: {e}", file=sys.stderr)
         sys.exit(1)
